@@ -32,8 +32,9 @@ The running panel currently includes two official provider adapters:
 - MiniMax calls the China or global Coding Plan `remains` endpoint and displays
   the remaining 5-hour window plus the 7-day window when that plan enables it.
 
-Credentials are read from Pi's `AuthStorage`, used only in server-side requests
-to the matching official provider domain, and never returned to the launcher.
+Credentials are resolved through Pi's `ModelRuntime`, used only in server-side
+requests to the matching official provider domain, and never returned to the
+launcher.
 Provider results are cached for 60 seconds.
 
 ## Development

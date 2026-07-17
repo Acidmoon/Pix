@@ -1,4 +1,4 @@
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 
 export interface ProviderAccountSummary {
   id: string;
@@ -190,14 +190,16 @@ export async function getProviderAccountSummaries(): Promise<ProviderAccountSumm
   const cached = globalThis.__piProviderQuotaCache;
   if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) return cached.data;
 
-  const authStorage = AuthStorage.create();
-  const storedKey = (provider: string): string | undefined => {
-    const credential = authStorage.get(provider);
-    return credential?.type === "api_key" ? credential.key : undefined;
+  const modelRuntime = await ModelRuntime.create();
+  const storedKey = async (provider: string): Promise<string | undefined> => {
+    const result = await modelRuntime.getAuth(provider);
+    return result?.auth.apiKey;
   };
-  const deepSeekKey = storedKey("deepseek");
-  const miniMaxCnKey = storedKey("minimax-cn");
-  const miniMaxGlobalKey = storedKey("minimax");
+  const [deepSeekKey, miniMaxCnKey, miniMaxGlobalKey] = await Promise.all([
+    storedKey("deepseek"),
+    storedKey("minimax-cn"),
+    storedKey("minimax"),
+  ]);
 
   const miniMaxProvider = miniMaxCnKey ? "minimax-cn" : "minimax";
   const data = await Promise.all([
