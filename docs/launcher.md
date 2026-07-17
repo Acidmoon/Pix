@@ -16,7 +16,9 @@ those remain in the browser UI.
 - Expand on click into a start view or a running-service control panel.
 - Show the service PID, port, active AgentSession count, provider balances, and
   subscription quota remaining.
-- Open Edge or Chrome in `--app` mode with an isolated temporary profile.
+- Open Edge or Chrome in `--app` mode with a dedicated persistent profile, so
+  extensions and settings survive restarts while the browser process stays
+  owned by the launcher.
 - Request authenticated AgentSession cleanup before stopping the service.
 - Place the browser and service in Windows Job Objects so their process trees
   are terminated if graceful shutdown times out or the launcher exits.

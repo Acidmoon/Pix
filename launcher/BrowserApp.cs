@@ -1,9 +1,10 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Microsoft.Win32;
 
 namespace Pix.Launcher;
 
-/// <summary>Runs Pi Web in an isolated Chromium app window owned by a Job Object.</summary>
+/// <summary>Runs Pi Web in a dedicated Chromium app window owned by a Job Object.</summary>
 internal sealed class BrowserApp : IDisposable
 {
     private WindowsJobObject? job;
@@ -11,6 +12,38 @@ internal sealed class BrowserApp : IDisposable
     private string? profileDirectory;
 
     public bool IsOpen => process is { HasExited: false };
+
+    /// <summary>Current bounds of the isolated app window, when it exists and is not minimized.</summary>
+    public bool TryGetWindowBounds(out Rectangle bounds)
+    {
+        bounds = default;
+        if (process is not { HasExited: false }) return false;
+        process.Refresh();
+        var handle = process.MainWindowHandle;
+        if (handle == IntPtr.Zero || IsIconic(handle)) return false;
+        if (!GetWindowRect(handle, out var rect)) return false;
+        var width = rect.Right - rect.Left;
+        var height = rect.Bottom - rect.Top;
+        if (width <= 0 || height <= 0) return false;
+        bounds = new Rectangle(rect.Left, rect.Top, width, height);
+        return true;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr handle, out Rect rect);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsIconic(IntPtr handle);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Rect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
 
     public void Open(Uri url)
     {
@@ -24,17 +57,21 @@ internal sealed class BrowserApp : IDisposable
             return;
         }
 
+        // A persistent dedicated profile keeps extensions and settings across
+        // launches, so policy-injected extensions only run their first-run
+        // behavior once instead of on every start. It stays separate from the
+        // user's everyday browser profile, which keeps this process owned by
+        // the launcher's Job Object.
         profileDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Pix",
-            "BrowserProfiles",
-            Guid.NewGuid().ToString("N"));
+            "BrowserProfile");
         Directory.CreateDirectory(profileDirectory);
 
         job = new WindowsJobObject();
         process = job.StartProcess(
             browser,
-            $"--app=\"{url}\" --user-data-dir=\"{profileDirectory}\" --no-first-run --no-default-browser-check",
+            $"--app=\"{url}\" --user-data-dir=\"{profileDirectory}\" --no-first-run --no-default-browser-check --hide-crash-restore-bubble",
             Path.GetDirectoryName(browser)!);
     }
 
@@ -50,13 +87,7 @@ internal sealed class BrowserApp : IDisposable
         process = null;
         job?.Dispose();
         job = null;
-
-        if (profileDirectory is not null)
-        {
-            try { Directory.Delete(profileDirectory, recursive: true); }
-            catch { /* Chromium can briefly retain profile files after exit. */ }
-            profileDirectory = null;
-        }
+        profileDirectory = null;
     }
 
     public void Dispose() => Stop();

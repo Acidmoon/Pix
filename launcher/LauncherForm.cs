@@ -3,54 +3,17 @@ using System.Runtime.InteropServices;
 
 namespace Pix.Launcher;
 
+/// <summary>The floating ball. It never repaints or reshapes when the panel opens.</summary>
 internal sealed class LauncherForm : Form
 {
-    private static readonly Size CollapsedSize = new(64, 64);
-    private static readonly Size ExpandedSize = new(420, 600);
-
-    private static readonly Color Canvas = Color.FromArgb(245, 246, 248);
-    private static readonly Color Ink = Color.FromArgb(24, 28, 33);
-    private static readonly Color InkHover = Color.FromArgb(38, 44, 52);
-    private static readonly Color InkPress = Color.FromArgb(12, 15, 19);
-    private static readonly Color Muted = Color.FromArgb(101, 110, 120);
-    private static readonly Color Faint = Color.FromArgb(154, 161, 170);
-    private static readonly Color Hairline = Color.FromArgb(227, 230, 234);
-    private static readonly Color ButtonHover = Color.FromArgb(239, 241, 244);
-    private static readonly Color ButtonPress = Color.FromArgb(231, 234, 238);
-    private static readonly Color ButtonBorder = Color.FromArgb(214, 219, 224);
-    private static readonly Color Signal = Color.FromArgb(34, 176, 108);
-    private static readonly Color Amber = Color.FromArgb(211, 141, 42);
-    private static readonly Color Danger = Color.FromArgb(194, 68, 62);
-
-    private static readonly Font TitleFont = new("Bahnschrift SemiBold", 19F, FontStyle.Bold);
-    private static readonly Font StatusFont = new("Microsoft YaHei UI", 8.5F);
-    private static readonly Font MicroFont = new("Bahnschrift", 8F, FontStyle.Bold);
-    private static readonly Font HintFont = new("Bahnschrift", 7.5F);
-    private static readonly Font PanelTitleFont = new("Microsoft YaHei UI", 16F, FontStyle.Bold);
-    private static readonly Font MetaFont = new("Bahnschrift", 8.5F);
-    private static readonly Font BodyBoldFont = new("Microsoft YaHei UI", 8.5F, FontStyle.Bold);
-    private static readonly Font SectionFont = new("Microsoft YaHei UI", 12.5F, FontStyle.Bold);
-    private static readonly Font SyncFont = new("Bahnschrift", 7.5F);
-    private static readonly Font ButtonFont = new("Microsoft YaHei UI", 9F, FontStyle.Bold);
-
-    private const int ContentSlideOffset = 10;
+    private static readonly Size CollapsedSize = new(56, 56);
+    private const int PanelGap = 12;
+    private const int BrowserAnchorFromTop = 96;
 
     private readonly PiWebProcessManager service = new();
     private readonly BrowserApp browser = new();
     private readonly FloatingIconControl floatingIcon = new();
-    private readonly Panel contentPanel = new();
-    private readonly Panel stoppedPanel = new();
-    private readonly Panel runningPanel = new();
-    private readonly Label titleLabel = new();
-    private readonly Label statusLabel = new();
-    private readonly Label serviceMetaLabel = new();
-    private readonly Label agentLabel = new();
-    private readonly Label accountsUpdatedLabel = new();
-    private readonly FlowLayoutPanel accountsList = new();
-    private readonly SmoothButton collapseButton = new();
-    private readonly SmoothButton startButton = new();
-    private readonly SmoothButton openButton = new();
-    private readonly SmoothButton stopButton = new();
+    private readonly PanelForm panel = new();
     private readonly System.Windows.Forms.Timer refreshTimer = new() { Interval = 1000 };
     private readonly ContextMenuStrip contextMenu = new();
     private readonly ContextMenuStrip trayMenu = new();
@@ -59,28 +22,17 @@ internal sealed class LauncherForm : Form
     private readonly ToolStripMenuItem trayOpenItem = new("打开界面");
     private readonly ToolStripMenuItem trayStopItem = new("停止 Pi Web");
 
-    private readonly ValueAnimator boundsAnimator = new()
-    {
-        Duration = TimeSpan.FromMilliseconds(230),
-        Ease = Easing.OutQuart,
-    };
-    private readonly ValueAnimator contentAnimator = new()
-    {
-        Duration = TimeSpan.FromMilliseconds(150),
-        Ease = Easing.OutCubic,
-    };
     private readonly ValueAnimator fadeAnimator = new()
     {
         Duration = TimeSpan.FromMilliseconds(180),
         Ease = Easing.OutCubic,
     };
+    private readonly MotionTicker followTicker = new();
 
-    private Rectangle boundsStart;
-    private Rectangle boundsTarget;
-    private Point iconAnchorScreen;
-    private bool expanding;
+    private Point followTarget;
+    private double followPollAccumulator;
+    private bool attachedToBrowser;
     private bool expanded;
-    private bool expandsLeft;
     private bool closing;
     private bool busy;
     private bool refreshInProgress;
@@ -96,18 +48,26 @@ internal sealed class LauncherForm : Form
         ShowInTaskbar = false;
         TopMost = true;
         StartPosition = FormStartPosition.Manual;
-        BackColor = Canvas;
+        BackColor = Color.FromArgb(16, 19, 24);
         Font = new Font("Microsoft YaHei UI", 9F);
+        AutoScaleMode = AutoScaleMode.None;
         KeyPreview = true;
+        // Windows enforces SM_CXMINTRACK (~170px at 120 DPI) as the minimum
+        // window width unless WinForms sees an explicit MinimumSize.
+        MinimumSize = new Size(1, 1);
         Size = CollapsedSize;
         Opacity = 0;
 
-        BuildLayout();
+        floatingIcon.Dock = DockStyle.Fill;
+        floatingIcon.ContextMenuStrip = contextMenu;
+        Controls.Add(floatingIcon);
+
         BuildTrayIcon();
         WireEvents();
+        WirePanel();
         RestoreInitialPosition();
-        ApplyWindowShape();
-        RenderStopped();
+        ApplyBallShape();
+        panel.RenderStopped();
         refreshTimer.Start();
     }
 
@@ -128,142 +88,13 @@ internal sealed class LauncherForm : Form
         TopMost = true;
     }
 
-    private void BuildLayout()
+    private void WirePanel()
     {
-        floatingIcon.Location = new Point(4, 4);
-        floatingIcon.ContextMenuStrip = contextMenu;
-        Controls.Add(floatingIcon);
-
-        contentPanel.Location = Point.Empty;
-        contentPanel.Size = ExpandedSize;
-        contentPanel.BackColor = Canvas;
-        contentPanel.Visible = false;
-        contentPanel.Controls.Add(new Panel
-        {
-            Location = new Point(0, 0),
-            Size = new Size(4, ExpandedSize.Height),
-            BackColor = Color.FromArgb(30, 35, 41),
-        });
-
-        titleLabel.Text = "PIX";
-        titleLabel.Font = TitleFont;
-        titleLabel.ForeColor = Ink;
-        titleLabel.AutoSize = true;
-        statusLabel.AutoSize = true;
-        statusLabel.ForeColor = Muted;
-        statusLabel.Font = StatusFont;
-
-        ConfigureButton(collapseButton, "收起", new Size(56, 30), primary: false);
-        collapseButton.Click += (_, _) => Collapse();
-
-        BuildStoppedPanel();
-        BuildRunningPanel();
-        contentPanel.Controls.AddRange([titleLabel, statusLabel, collapseButton, stoppedPanel, runningPanel]);
-        Controls.Add(contentPanel);
-        floatingIcon.BringToFront();
-
-        contextMenu.Items.Add("展开", null, (_, _) => ShowControlPanel());
-        contextMenu.Items.Add("退出", null, async (_, _) => await ExitAsync());
-    }
-
-    private void BuildStoppedPanel()
-    {
-        stoppedPanel.Location = new Point(24, 92);
-        stoppedPanel.Size = new Size(372, 482);
-
-        var stateCode = new Label
-        {
-            Text = "CONTROL PLANE · OFFLINE",
-            Font = MicroFont,
-            ForeColor = Faint,
-            AutoSize = true,
-            Location = new Point(0, 6),
-        };
-        var stoppedTitle = new Label
-        {
-            Text = "Pi Web 尚未启动",
-            Font = PanelTitleFont,
-            ForeColor = Ink,
-            AutoSize = true,
-            Location = new Point(-1, 34),
-        };
-        var readyLine = new Panel
-        {
-            Location = new Point(0, 78),
-            Size = new Size(372, 1),
-            BackColor = Hairline,
-        };
-        ConfigureButton(startButton, "启动 Pi Web", new Size(372, 46), primary: true);
-        startButton.Location = new Point(0, 100);
-        startButton.CornerRadius = 10;
-
-        var footnote = new Label
-        {
-            Text = "LOCAL  ·  ISOLATED  ·  GUARDED",
-            Font = HintFont,
-            ForeColor = Faint,
-            AutoSize = true,
-            Location = new Point(0, 164),
-        };
-        stoppedPanel.Controls.AddRange([stateCode, stoppedTitle, readyLine, startButton, footnote]);
-    }
-
-    private void BuildRunningPanel()
-    {
-        runningPanel.Location = new Point(24, 88);
-        runningPanel.Size = new Size(372, 496);
-
-        serviceMetaLabel.AutoSize = true;
-        serviceMetaLabel.Location = new Point(0, 2);
-        serviceMetaLabel.ForeColor = Muted;
-        serviceMetaLabel.Font = MetaFont;
-        agentLabel.AutoSize = true;
-        agentLabel.Location = new Point(0, 27);
-        agentLabel.ForeColor = Ink;
-        agentLabel.Font = BodyBoldFont;
-
-        ConfigureButton(openButton, "打开界面", new Size(238, 36), primary: true);
-        openButton.Location = new Point(0, 55);
-        ConfigureButton(stopButton, "停止", new Size(124, 36), primary: false);
-        stopButton.Location = new Point(248, 55);
-        stopButton.SetPalette(Color.White, ButtonHover, ButtonPress, Danger, Danger);
-
-        var separator = new Panel
-        {
-            BackColor = Hairline,
-            Location = new Point(0, 110),
-            Size = new Size(372, 1),
-        };
-        var accountsTitle = new Label
-        {
-            Text = "余额与额度",
-            Font = SectionFont,
-            ForeColor = Ink,
-            AutoSize = true,
-            Location = new Point(0, 127),
-        };
-        accountsUpdatedLabel.AutoSize = true;
-        accountsUpdatedLabel.ForeColor = Muted;
-        accountsUpdatedLabel.Font = SyncFont;
-        accountsUpdatedLabel.Location = new Point(0, 158);
-
-        accountsList.Location = new Point(0, 184);
-        accountsList.Size = new Size(372, 309);
-        accountsList.AutoScroll = true;
-        accountsList.FlowDirection = FlowDirection.TopDown;
-        accountsList.WrapContents = false;
-        accountsList.Padding = Padding.Empty;
-
-        runningPanel.Controls.AddRange([
-            serviceMetaLabel,
-            agentLabel,
-            openButton,
-            stopButton,
-            separator,
-            accountsTitle,
-            accountsUpdatedLabel,
-            accountsList,
-        ]);
+        panel.Owner = this;
+        panel.StartRequested += async () => await StartServiceAsync();
+        panel.StopRequested += async () => await StopServiceAsync();
+        panel.OpenRequested += () => OpenBrowser();
+        panel.CollapseRequested += () => Collapse();
     }
 
     private void BuildTrayIcon()
@@ -285,6 +116,9 @@ internal sealed class LauncherForm : Form
         trayIcon.ContextMenuStrip = trayMenu;
         trayIcon.Visible = true;
         trayIcon.DoubleClick += (_, _) => ShowControlPanel();
+
+        contextMenu.Items.Add("展开", null, (_, _) => ShowControlPanel());
+        contextMenu.Items.Add("退出", null, async (_, _) => await ExitAsync());
     }
 
     private void WireEvents()
@@ -292,19 +126,13 @@ internal sealed class LauncherForm : Form
         floatingIcon.MouseDown += OnIconMouseDown;
         floatingIcon.MouseMove += OnIconMouseMove;
         floatingIcon.MouseUp += OnIconMouseUp;
-        startButton.Click += async (_, _) => await StartServiceAsync();
-        openButton.Click += (_, _) => OpenBrowser();
-        stopButton.Click += async (_, _) => await StopServiceAsync();
         refreshTimer.Tick += async (_, _) => await RefreshStatusAsync();
         FormClosing += OnFormClosing;
-        Resize += (_, _) => ApplyWindowShape();
         KeyDown += (_, eventArgs) => { if (eventArgs.KeyCode == Keys.Escape) Collapse(); };
         Shown += (_, _) => fadeAnimator.Start();
 
         fadeAnimator.Progressed += t => Opacity = t;
-        boundsAnimator.Progressed += OnBoundsProgress;
-        boundsAnimator.Completed += OnBoundsCompleted;
-        contentAnimator.Progressed += t => contentPanel.Top = PaintLerp.Lerp(ContentSlideOffset, 0, t);
+        followTicker.Tick += dt => FollowBrowserTick(dt);
     }
 
     private void RestoreInitialPosition()
@@ -318,7 +146,7 @@ internal sealed class LauncherForm : Form
 
     private void OnIconMouseDown(object? sender, MouseEventArgs eventArgs)
     {
-        if (eventArgs.Button != MouseButtons.Left || boundsAnimator.IsRunning) return;
+        if (eventArgs.Button != MouseButtons.Left) return;
         pointerMoved = false;
         pointerDownScreen = Cursor.Position;
         formDownLocation = Location;
@@ -327,9 +155,16 @@ internal sealed class LauncherForm : Form
 
     private void OnIconMouseMove(object? sender, MouseEventArgs eventArgs)
     {
-        if (!floatingIcon.Capture || eventArgs.Button != MouseButtons.Left || boundsAnimator.IsRunning) return;
+        if (!floatingIcon.Capture || eventArgs.Button != MouseButtons.Left) return;
         var delta = new Size(Cursor.Position.X - pointerDownScreen.X, Cursor.Position.Y - pointerDownScreen.Y);
-        if (Math.Abs(delta.Width) + Math.Abs(delta.Height) > 4) pointerMoved = true;
+        if (Math.Abs(delta.Width) + Math.Abs(delta.Height) > 4 && !pointerMoved)
+        {
+            pointerMoved = true;
+            // A deliberate drag releases the icon from the browser window edge.
+            attachedToBrowser = false;
+            // The panel stays behind when the ball travels.
+            Collapse();
+        }
         Location = new Point(formDownLocation.X + delta.Width, formDownLocation.Y + delta.Height);
     }
 
@@ -344,115 +179,92 @@ internal sealed class LauncherForm : Form
         else
         {
             KeepWindowOnScreen();
-            LauncherPlacement.Save(GetPersistedCollapsedLocation());
+            LauncherPlacement.Save(Location);
         }
     }
 
     private void Expand()
     {
-        if (expanded || boundsAnimator.IsRunning) return;
-        var iconScreenLocation = GetCollapsedIconScreenLocation();
-        var area = Screen.FromPoint(iconScreenLocation).WorkingArea;
-        var collapsedLeft = iconScreenLocation.X - 4;
-        var collapsedRight = iconScreenLocation.X + 60;
-        var roomRight = area.Right - collapsedLeft;
-        var roomLeft = collapsedRight - area.Left;
-        expandsLeft = roomRight < ExpandedSize.Width && roomLeft >= roomRight;
-
-        expanding = true;
+        if (expanded || closing) return;
         expanded = true;
-        iconAnchorScreen = iconScreenLocation;
-        var iconOffset = expandsLeft ? new Point(ExpandedSize.Width - 60, 4) : new Point(4, 4);
-        var targetLocation = new Point(iconAnchorScreen.X - iconOffset.X, iconAnchorScreen.Y - iconOffset.Y);
-        targetLocation.X = Math.Clamp(targetLocation.X, area.Left, Math.Max(area.Left, area.Right - ExpandedSize.Width));
-        targetLocation.Y = Math.Clamp(targetLocation.Y, area.Top, Math.Max(area.Top, area.Bottom - ExpandedSize.Height));
-        boundsStart = Bounds;
-        boundsTarget = new Rectangle(targetLocation, ExpandedSize);
-        LayoutHeaderForDirection();
-        contentPanel.Visible = false;
-        boundsAnimator.Start();
+        panel.ShowAt(ComputePanelLocation());
+        nextAccountRefresh = DateTimeOffset.MinValue;
+        _ = RefreshStatusAsync();
     }
 
     private void Collapse()
     {
-        if (!expanded || boundsAnimator.IsRunning) return;
-        expanding = false;
+        if (!expanded) return;
         expanded = false;
-        contentAnimator.Stop();
-        contentPanel.Visible = false;
-        iconAnchorScreen = PointToScreen(floatingIcon.Location);
-        boundsStart = Bounds;
-        boundsTarget = new Rectangle(new Point(iconAnchorScreen.X - 4, iconAnchorScreen.Y - 4), CollapsedSize);
-        boundsAnimator.Start();
+        panel.HideAnimated();
     }
 
-    private void OnBoundsProgress(double t)
+    private Point ComputePanelLocation()
     {
-        var x = PaintLerp.Lerp(boundsStart.X, boundsTarget.X, t);
-        var y = PaintLerp.Lerp(boundsStart.Y, boundsTarget.Y, t);
-        var width = PaintLerp.Lerp(boundsStart.Width, boundsTarget.Width, t);
-        var height = PaintLerp.Lerp(boundsStart.Height, boundsTarget.Height, t);
-        SetBounds(x, y, width, height);
-        floatingIcon.Location = new Point(iconAnchorScreen.X - x, iconAnchorScreen.Y - y);
-        if (expanding && !contentPanel.Visible && t >= 0.6)
-        {
-            ShowContentAnimated();
-        }
+        var size = PanelForm.PanelSize;
+        var area = Screen.FromPoint(new Point(Location.X + CollapsedSize.Width, Location.Y)).WorkingArea;
+        var roomRight = area.Right - (Location.X + CollapsedSize.Width) - PanelGap;
+        var x = roomRight >= size.Width
+            ? Location.X + CollapsedSize.Width + PanelGap
+            : Location.X - PanelGap - size.Width;
+        x = Math.Clamp(x, area.Left + 8, Math.Max(area.Left + 8, area.Right - size.Width - 8));
+        var y = Math.Clamp(Location.Y, area.Top + 8, Math.Max(area.Top + 8, area.Bottom - size.Height - 8));
+        return new Point(x, y);
     }
 
-    private void OnBoundsCompleted()
+    /// <summary>Dock the floating icon to the browser window edge until the user drags it away.</summary>
+    private void AttachToBrowser()
     {
-        SetBounds(boundsTarget.X, boundsTarget.Y, boundsTarget.Width, boundsTarget.Height);
-        if (expanding)
-        {
-            if (!contentPanel.Visible) ShowContentAnimated();
-            nextAccountRefresh = DateTimeOffset.MinValue;
-            _ = RefreshStatusAsync();
-        }
-        else
-        {
-            floatingIcon.Location = new Point(4, 4);
-            Location = ClampCollapsedLocation(boundsTarget.Location);
-            LauncherPlacement.Save(Location);
-        }
+        if (!browser.IsOpen) return;
+        attachedToBrowser = true;
+        followPollAccumulator = 1; // Poll the window bounds on the first tick.
+        followTarget = Location;
+        followTicker.EnsureRunning();
     }
 
-    private void ShowContentAnimated()
+    private void FollowBrowserTick(double dt)
     {
-        contentPanel.Top = ContentSlideOffset;
-        contentPanel.Visible = true;
-        contentPanel.SendToBack();
-        floatingIcon.BringToFront();
-        contentAnimator.Start();
-    }
+        if (!attachedToBrowser || closing)
+        {
+            followTicker.Stop();
+            return;
+        }
+        // Manual dragging or an open panel pauses following.
+        if (expanded || floatingIcon.Capture) return;
 
-    private void LayoutHeaderForDirection()
-    {
-        if (expandsLeft)
+        followPollAccumulator += dt;
+        if (followPollAccumulator >= 0.05)
         {
-            titleLabel.Location = new Point(24, 14);
-            statusLabel.Location = new Point(26, 50);
-            collapseButton.Location = new Point(282, 17);
+            followPollAccumulator = 0;
+            if (!browser.TryGetWindowBounds(out var rect))
+            {
+                if (!browser.IsOpen) attachedToBrowser = false;
+                return;
+            }
+            var targetY = Math.Clamp(
+                rect.Top + BrowserAnchorFromTop - CollapsedSize.Height / 2,
+                rect.Top + 4,
+                Math.Max(rect.Top + 4, rect.Bottom - CollapsedSize.Height - 4));
+            followTarget = new Point(rect.Right - CollapsedSize.Width / 2, targetY);
         }
-        else
-        {
-            titleLabel.Location = new Point(78, 14);
-            statusLabel.Location = new Point(80, 50);
-            collapseButton.Location = new Point(338, 17);
-        }
-        floatingIcon.BringToFront();
+
+        var nextLocation = new Point(
+            (int)Math.Round(MotionStep.Approach(Location.X, followTarget.X, dt, 16)),
+            (int)Math.Round(MotionStep.Approach(Location.Y, followTarget.Y, dt, 16)));
+        if (nextLocation != Location) Location = nextLocation;
     }
 
     private async Task StartServiceAsync()
     {
         SetBusy(true);
-        statusLabel.Text = "正在启动服务";
+        panel.RenderBusyStatus("正在启动…");
         floatingIcon.VisualState = FloatingIconControl.ServiceVisualState.Starting;
         try
         {
             await service.StartAsync();
             RenderRunning(null);
             OpenBrowser();
+            AttachToBrowser();
             nextAccountRefresh = DateTimeOffset.MinValue;
             await RefreshStatusAsync();
         }
@@ -470,7 +282,9 @@ internal sealed class LauncherForm : Form
     private async Task StopServiceAsync()
     {
         SetBusy(true);
-        statusLabel.Text = "正在停止服务";
+        panel.RenderBusyStatus("正在停止…");
+        attachedToBrowser = false;
+        followTicker.Stop();
         browser.Stop();
         await service.StopAsync();
         RenderStopped();
@@ -504,12 +318,12 @@ internal sealed class LauncherForm : Form
             if (expanded && health is not null && DateTimeOffset.UtcNow >= nextAccountRefresh)
             {
                 nextAccountRefresh = DateTimeOffset.UtcNow.AddSeconds(60);
-                RenderAccounts(await service.GetLauncherStatusAsync());
+                panel.RenderAccounts(await service.GetLauncherStatusAsync());
             }
         }
         catch (Exception error)
         {
-            accountsUpdatedLabel.Text = $"SYNC ERROR · {error.Message}";
+            panel.RenderSyncError(error.Message);
         }
         finally
         {
@@ -522,72 +336,22 @@ internal sealed class LauncherForm : Form
         floatingIcon.VisualState = health is null
             ? FloatingIconControl.ServiceVisualState.Starting
             : FloatingIconControl.ServiceVisualState.Running;
-        statusLabel.Text = health is null ? "CONNECTING" : "SERVICE ONLINE";
-        statusLabel.ForeColor = health is null ? Amber : Signal;
-        stoppedPanel.Visible = false;
-        runningPanel.Visible = true;
-        serviceMetaLabel.Text = $"PID {service.ProcessId ?? 0}   PORT {service.Port ?? 0}";
-        agentLabel.Text = health is null
-            ? "Agent 状态  ·  检查中"
-            : health.AgentRunning ? $"Agent 状态  ·  运行中 {health.RunningAgentCount}" : "Agent 状态  ·  空闲";
-        openButton.Enabled = !busy && health is not null;
-        stopButton.Enabled = !busy;
-        startButton.Enabled = false;
+        panel.RenderRunning(health, service.ProcessId, service.Port);
         UpdateTrayCommands();
     }
 
     private void RenderStopped()
     {
         floatingIcon.VisualState = FloatingIconControl.ServiceVisualState.Stopped;
-        statusLabel.Text = "SERVICE OFFLINE";
-        statusLabel.ForeColor = Muted;
-        stoppedPanel.Visible = true;
-        runningPanel.Visible = false;
-        startButton.Enabled = !busy;
-        openButton.Enabled = false;
-        stopButton.Enabled = false;
+        panel.RenderStopped();
         UpdateTrayCommands();
-    }
-
-    private void RenderAccounts(LauncherStatusSnapshot? snapshot)
-    {
-        if (snapshot is null)
-        {
-            accountsUpdatedLabel.Text = "SYNC FAILED · 自动重试";
-            return;
-        }
-
-        accountsUpdatedLabel.Text = $"SYNC {DateTime.Now:HH:mm:ss}";
-        accountsList.SuspendLayout();
-        var reused = accountsList.Controls.OfType<ProviderAccountControl>()
-            .ToDictionary(control => (string)control.Tag!);
-        var ordered = new List<ProviderAccountControl>(snapshot.Providers.Count);
-        foreach (var provider in snapshot.Providers)
-        {
-            if (!reused.TryGetValue(provider.Id, out var control))
-            {
-                control = new ProviderAccountControl { Tag = provider.Id };
-            }
-            else
-            {
-                reused.Remove(provider.Id);
-            }
-            control.SetSnapshot(provider);
-            ordered.Add(control);
-        }
-        foreach (var leftover in reused.Values) leftover.Dispose();
-        accountsList.Controls.Clear();
-        accountsList.Controls.AddRange(ordered.ToArray());
-        accountsList.ResumeLayout();
     }
 
     private void SetBusy(bool value)
     {
         busy = value;
         UseWaitCursor = value;
-        startButton.Enabled = !value && !service.IsRunning;
-        openButton.Enabled = !value && service.IsRunning;
-        stopButton.Enabled = !value && service.IsRunning;
+        panel.SetBusy(value, service.IsRunning);
         UpdateTrayCommands();
     }
 
@@ -608,7 +372,7 @@ internal sealed class LauncherForm : Form
             graphics.Clear(Color.Transparent);
             using var background = new SolidBrush(Color.FromArgb(24, 28, 33));
             graphics.FillEllipse(background, 1, 1, 30, 30);
-            using var signal = new SolidBrush(Color.FromArgb(67, 229, 143));
+            using var signal = new SolidBrush(Color.FromArgb(74, 224, 158));
             graphics.FillEllipse(signal, 23, 23, 6, 6);
             using var font = new Font("Bahnschrift SemiBold", 17F, FontStyle.Bold, GraphicsUnit.Pixel);
             using var foreground = new SolidBrush(Color.White);
@@ -621,19 +385,9 @@ internal sealed class LauncherForm : Form
         finally { DestroyIcon(iconHandle); }
     }
 
-    private Point GetCollapsedIconScreenLocation() => expanded
-        ? PointToScreen(floatingIcon.Location)
-        : new Point(Location.X + 4, Location.Y + 4);
-
-    private Point GetPersistedCollapsedLocation()
-    {
-        var iconLocation = GetCollapsedIconScreenLocation();
-        return ClampCollapsedLocation(new Point(iconLocation.X - 4, iconLocation.Y - 4));
-    }
-
     private void KeepWindowOnScreen()
     {
-        var area = Screen.FromPoint(GetCollapsedIconScreenLocation()).WorkingArea;
+        var area = Screen.FromPoint(Location).WorkingArea;
         Location = new Point(
             Math.Clamp(Location.X, area.Left, Math.Max(area.Left, area.Right - Width)),
             Math.Clamp(Location.Y, area.Top, Math.Max(area.Top, area.Bottom - Height)));
@@ -647,58 +401,24 @@ internal sealed class LauncherForm : Form
             Math.Clamp(point.Y, area.Top, area.Bottom - CollapsedSize.Height));
     }
 
-    private void ApplyWindowShape()
+    private void ApplyBallShape()
     {
-        var t = Math.Clamp(
-            (Width - CollapsedSize.Width) / (double)(ExpandedSize.Width - CollapsedSize.Width), 0, 1);
         using var path = new GraphicsPath();
-        if (t <= 0.001)
-        {
-            path.AddEllipse(ClientRectangle);
-        }
-        else
-        {
-            var radius = PaintLerp.Lerp(Math.Min(Width, Height) / 2, 13, t);
-            var diameter = Math.Min(radius * 2, Math.Min(Width, Height) - 1);
-            path.AddArc(0, 0, diameter, diameter, 180, 90);
-            path.AddArc(Width - diameter - 1, 0, diameter, diameter, 270, 90);
-            path.AddArc(Width - diameter - 1, Height - diameter - 1, diameter, diameter, 0, 90);
-            path.AddArc(0, Height - diameter - 1, diameter, diameter, 90, 90);
-            path.CloseFigure();
-        }
-
+        path.AddEllipse(ClientRectangle);
         var old = Region;
         Region = new Region(path);
         old?.Dispose();
-    }
-
-    private static void ConfigureButton(SmoothButton button, string text, Size size, bool primary)
-    {
-        button.Text = text;
-        button.Size = size;
-        button.Font = ButtonFont;
-        if (primary)
-        {
-            button.FlatAppearance.BorderSize = 0;
-            button.SetPalette(Ink, InkHover, InkPress, Color.White, Color.White);
-        }
-        else
-        {
-            button.FlatAppearance.BorderColor = ButtonBorder;
-            button.SetPalette(Color.White, ButtonHover, ButtonPress, Color.FromArgb(70, 77, 87), Ink);
-        }
     }
 
     private async Task ExitAsync()
     {
         if (closing) return;
         closing = true;
-        boundsAnimator.Stop();
-        contentAnimator.Stop();
         fadeAnimator.Stop();
+        followTicker.Stop();
         refreshTimer.Stop();
         Enabled = false;
-        LauncherPlacement.Save(GetPersistedCollapsedLocation());
+        if (!attachedToBrowser) LauncherPlacement.Save(Location);
         browser.Stop();
         await service.StopAsync();
         browser.Dispose();
@@ -706,6 +426,7 @@ internal sealed class LauncherForm : Form
         trayIcon.Visible = false;
         trayIcon.Dispose();
         trayMenu.Dispose();
+        panel.Dispose();
         FormClosing -= OnFormClosing;
         Close();
     }
@@ -721,10 +442,10 @@ internal sealed class LauncherForm : Form
     {
         if (disposing)
         {
-            boundsAnimator.Dispose();
-            contentAnimator.Dispose();
             fadeAnimator.Dispose();
+            followTicker.Dispose();
             refreshTimer.Dispose();
+            panel.Dispose();
         }
         base.Dispose(disposing);
     }

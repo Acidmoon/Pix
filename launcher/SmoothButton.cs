@@ -9,12 +9,15 @@ internal sealed class SmoothButton : Button
     private double blend;
     private double target;
     private bool pressed;
+    private bool interactable = true;
 
     private Color baseBack = Color.White;
     private Color hoverBack = Color.White;
     private Color pressBack = Color.White;
     private Color baseFore = Color.Black;
     private Color hoverFore = Color.Black;
+    private Color disabledBack = Color.White;
+    private Color disabledFore = Color.Black;
 
     public int CornerRadius { get; set; } = 9;
 
@@ -29,7 +32,7 @@ internal sealed class SmoothButton : Button
         MouseLeave += (_, _) => SetTarget(0);
         MouseDown += (_, eventArgs) =>
         {
-            if (eventArgs.Button == MouseButtons.Left)
+            if (eventArgs.Button == MouseButtons.Left && interactable)
             {
                 pressed = true;
                 ApplyColors();
@@ -50,14 +53,46 @@ internal sealed class SmoothButton : Button
         };
     }
 
-    public void SetPalette(Color normalBack, Color hoverBackColor, Color pressedBackColor, Color normalFore, Color hoverForeColor)
+    public void SetPalette(
+        Color normalBack,
+        Color hoverBackColor,
+        Color pressedBackColor,
+        Color normalFore,
+        Color hoverForeColor,
+        Color? disabledBackColor = null,
+        Color? disabledForeColor = null)
     {
         baseBack = normalBack;
         hoverBack = hoverBackColor;
         pressBack = pressedBackColor;
         baseFore = normalFore;
         hoverFore = hoverForeColor;
+        disabledBack = disabledBackColor ?? PaintLerp.LerpColor(normalBack, normalFore, 0.06);
+        disabledFore = disabledForeColor ?? PaintLerp.LerpColor(normalFore, normalBack, 0.55);
         ApplyColors();
+    }
+
+    /// <summary>
+    /// WinForms paints disabled Flat buttons with the system GrayText color, which
+    /// is unreadable on a dark surface. Keep the button enabled and emulate the
+    /// disabled state with a muted palette plus click suppression instead.
+    /// </summary>
+    public void SetInteractable(bool value)
+    {
+        if (interactable == value) return;
+        interactable = value;
+        pressed = false;
+        target = 0;
+        blend = 0;
+        ticker.Stop();
+        Cursor = value ? Cursors.Hand : Cursors.Default;
+        ApplyColors();
+    }
+
+    protected override void OnClick(EventArgs eventArgs)
+    {
+        if (!interactable) return;
+        base.OnClick(eventArgs);
     }
 
     private void SetTarget(double value)
@@ -79,6 +114,13 @@ internal sealed class SmoothButton : Button
 
     private void ApplyColors()
     {
+        if (!interactable)
+        {
+            if (BackColor != disabledBack) BackColor = disabledBack;
+            if (ForeColor != disabledFore) ForeColor = disabledFore;
+            return;
+        }
+
         var back = PaintLerp.LerpColor(baseBack, hoverBack, blend);
         if (pressed) back = PaintLerp.LerpColor(back, pressBack, 0.85);
         if (BackColor != back) BackColor = back;

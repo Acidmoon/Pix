@@ -12,13 +12,14 @@ internal sealed class FloatingIconControl : Control
     private const float SpinArcSweep = 70F;
     private const float SpinDegreesPerSecond = 260F;
 
-    private static readonly Color ShellBase = Color.FromArgb(23, 27, 32);
-    private static readonly Color ShellHover = Color.FromArgb(39, 45, 53);
-    private static readonly Color RingColor = Color.FromArgb(84, 93, 104);
-    private static readonly Color SignalStopped = Color.FromArgb(148, 157, 167);
-    private static readonly Color SignalStarting = Color.FromArgb(240, 176, 66);
-    private static readonly Color SignalRunning = Color.FromArgb(63, 224, 146);
-    private static readonly Font LetterFont = new("Bahnschrift SemiBold", 22F, FontStyle.Bold, GraphicsUnit.Pixel);
+    private static readonly Color ShellTopBase = Color.FromArgb(43, 48, 56);
+    private static readonly Color ShellTopHover = Color.FromArgb(58, 64, 74);
+    private static readonly Color ShellBottomBase = Color.FromArgb(16, 19, 24);
+    private static readonly Color ShellBottomHover = Color.FromArgb(26, 30, 37);
+    private static readonly Color SignalStopped = Color.FromArgb(122, 130, 140);
+    private static readonly Color SignalStarting = Color.FromArgb(238, 190, 94);
+    private static readonly Color SignalRunning = Color.FromArgb(74, 224, 158);
+    private static readonly Font LetterFont = new("Bahnschrift SemiBold", 20F, FontStyle.Bold, GraphicsUnit.Pixel);
 
     private readonly MotionTicker ticker;
     private ServiceVisualState visualState;
@@ -111,26 +112,42 @@ internal sealed class FloatingIconControl : Control
         base.OnPaint(eventArgs);
         var graphics = eventArgs.Graphics;
         graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        var outer = new Rectangle(1, 1, Width - 3, Height - 3);
+
+        // Hover lifts the whole mark with a subtle scale.
+        var scale = 1F + 0.05F * (float)hoverBlend;
+        graphics.TranslateTransform(Width / 2F, Height / 2F);
+        graphics.ScaleTransform(scale, scale);
+        graphics.TranslateTransform(-Width / 2F, -Height / 2F);
+
+        var outer = new Rectangle(3, 3, Width - 7, Height - 7);
         var inner = Rectangle.Inflate(outer, -4, -4);
         var signalColor = Color.FromArgb((int)signalR, (int)signalG, (int)signalB);
 
-        using var shadow = new SolidBrush(Color.FromArgb(34, 0, 0, 0));
-        graphics.FillEllipse(shadow, outer.X + 1, outer.Y + 2, outer.Width, outer.Height);
-        using var shell = new SolidBrush(PaintLerp.LerpColor(ShellBase, ShellHover, hoverBlend));
-        graphics.FillEllipse(shell, outer);
-        using var ringPen = new Pen(RingColor, 1F);
-        graphics.DrawEllipse(ringPen, inner);
+        // Layered soft shadow.
+        using var shadowFar = new SolidBrush(Color.FromArgb(13, 12, 15, 20));
+        graphics.FillEllipse(shadowFar, outer.X, outer.Y + 4, outer.Width, outer.Height);
+        using var shadowNear = new SolidBrush(Color.FromArgb(26, 12, 15, 20));
+        graphics.FillEllipse(shadowNear, outer.X + 1, outer.Y + 2, outer.Width - 1, outer.Height - 1);
 
+        // Gradient shell with a specular sweep.
+        using var shell = new LinearGradientBrush(
+            outer,
+            PaintLerp.LerpColor(ShellTopBase, ShellTopHover, hoverBlend),
+            PaintLerp.LerpColor(ShellBottomBase, ShellBottomHover, hoverBlend),
+            LinearGradientMode.Vertical);
+        graphics.FillEllipse(shell, outer);
+        using var specular = new Pen(Color.FromArgb(34, 255, 255, 255), 1.2F);
+        graphics.DrawArc(specular, Rectangle.Inflate(outer, -2, -2), 200, 140);
+
+        // Hairline track ring with the state arc on top.
+        using var trackPen = new Pen(Color.FromArgb(20 + (int)(14 * hoverBlend), 255, 255, 255), 1F);
+        graphics.DrawEllipse(trackPen, inner);
         using var signalPen = new Pen(signalColor, 2.5F) { StartCap = LineCap.Round, EndCap = LineCap.Round };
         graphics.DrawArc(signalPen, inner, arcStart, arcSweep);
 
-        using var textBrush = new SolidBrush(Color.FromArgb(244, 246, 248));
+        using var textBrush = new SolidBrush(Color.FromArgb(230, 233, 237));
         using var format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
         graphics.DrawString("P", LetterFont, textBrush, outer, format);
-
-        using var stateBrush = new SolidBrush(signalColor);
-        graphics.FillEllipse(stateBrush, Width - 14, Height - 14, 7, 7);
     }
 
     protected override void Dispose(bool disposing)
