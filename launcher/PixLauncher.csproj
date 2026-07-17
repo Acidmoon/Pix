@@ -7,5 +7,9 @@
     <Nullable>enable</Nullable>
     <AssemblyName>PixLauncher</AssemblyName>
     <RootNamespace>Pix.Launcher</RootNamespace>
+    <ApplicationIcon>Assets\pix.ico</ApplicationIcon>
   </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\pix.ico" />
+  </ItemGroup>
 </Project>

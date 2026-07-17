@@ -1,5 +1,4 @@
 using System.Drawing.Drawing2D;
-using System.Runtime.InteropServices;
 
 namespace Pix.Launcher;
 
@@ -56,6 +55,7 @@ internal sealed class LauncherForm : Form
         // window width unless WinForms sees an explicit MinimumSize.
         MinimumSize = new Size(1, 1);
         Size = CollapsedSize;
+        Icon = LoadAppIcon();
         Opacity = 0;
 
         floatingIcon.Dock = DockStyle.Fill;
@@ -111,7 +111,7 @@ internal sealed class LauncherForm : Form
         trayOpenItem.Click += (_, _) => OpenBrowser();
         trayStopItem.Click += async (_, _) => await StopServiceAsync();
 
-        trayIcon.Icon = CreateTrayIcon();
+        trayIcon.Icon = Icon;
         trayIcon.Text = "Pix Launcher";
         trayIcon.ContextMenuStrip = trayMenu;
         trayIcon.Visible = true;
@@ -363,26 +363,15 @@ internal sealed class LauncherForm : Form
         trayIcon.Text = service.IsRunning ? "Pix Launcher - 运行中" : "Pix Launcher - 未启动";
     }
 
-    private static Icon CreateTrayIcon()
+    internal static Icon LoadAppIcon()
     {
-        using var bitmap = new Bitmap(32, 32);
-        using (var graphics = Graphics.FromImage(bitmap))
-        {
-            graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            graphics.Clear(Color.Transparent);
-            using var background = new SolidBrush(Color.FromArgb(24, 28, 33));
-            graphics.FillEllipse(background, 1, 1, 30, 30);
-            using var signal = new SolidBrush(Color.FromArgb(74, 224, 158));
-            graphics.FillEllipse(signal, 23, 23, 6, 6);
-            using var font = new Font("Bahnschrift SemiBold", 17F, FontStyle.Bold, GraphicsUnit.Pixel);
-            using var foreground = new SolidBrush(Color.White);
-            using var format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-            graphics.DrawString("P", font, foreground, new RectangleF(1, 0, 30, 30), format);
-        }
-
-        var iconHandle = bitmap.GetHicon();
-        try { return (Icon)Icon.FromHandle(iconHandle).Clone(); }
-        finally { DestroyIcon(iconHandle); }
+        var assembly = System.Reflection.Assembly.GetExecutingAssembly();
+        var resourceName = Array.Find(
+            assembly.GetManifestResourceNames(),
+            name => name.EndsWith("pix.ico", StringComparison.OrdinalIgnoreCase));
+        if (resourceName is null) return SystemIcons.Application;
+        using var stream = assembly.GetManifestResourceStream(resourceName);
+        return new Icon(stream!);
     }
 
     private void KeepWindowOnScreen()
@@ -449,7 +438,4 @@ internal sealed class LauncherForm : Form
         }
         base.Dispose(disposing);
     }
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool DestroyIcon(IntPtr iconHandle);
 }

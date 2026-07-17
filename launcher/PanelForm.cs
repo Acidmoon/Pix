@@ -79,6 +79,7 @@ internal sealed class PanelForm : Form
         AutoScaleMode = AutoScaleMode.None;
         KeyPreview = true;
         Size = PanelSize;
+        Icon = LauncherForm.LoadAppIcon();
         Opacity = 0;
 
         BuildLayout();
