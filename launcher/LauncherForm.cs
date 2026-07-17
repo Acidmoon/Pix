@@ -7,11 +7,33 @@ internal sealed class LauncherForm : Form
 {
     private static readonly Size CollapsedSize = new(64, 64);
     private static readonly Size ExpandedSize = new(420, 600);
-    private static readonly Color Canvas = Color.FromArgb(245, 247, 248);
-    private static readonly Color Ink = Color.FromArgb(26, 30, 35);
-    private static readonly Color Muted = Color.FromArgb(103, 111, 121);
-    private static readonly Color Signal = Color.FromArgb(38, 177, 106);
-    private static readonly Color Danger = Color.FromArgb(190, 65, 62);
+
+    private static readonly Color Canvas = Color.FromArgb(245, 246, 248);
+    private static readonly Color Ink = Color.FromArgb(24, 28, 33);
+    private static readonly Color InkHover = Color.FromArgb(38, 44, 52);
+    private static readonly Color InkPress = Color.FromArgb(12, 15, 19);
+    private static readonly Color Muted = Color.FromArgb(101, 110, 120);
+    private static readonly Color Faint = Color.FromArgb(154, 161, 170);
+    private static readonly Color Hairline = Color.FromArgb(227, 230, 234);
+    private static readonly Color ButtonHover = Color.FromArgb(239, 241, 244);
+    private static readonly Color ButtonPress = Color.FromArgb(231, 234, 238);
+    private static readonly Color ButtonBorder = Color.FromArgb(214, 219, 224);
+    private static readonly Color Signal = Color.FromArgb(34, 176, 108);
+    private static readonly Color Amber = Color.FromArgb(211, 141, 42);
+    private static readonly Color Danger = Color.FromArgb(194, 68, 62);
+
+    private static readonly Font TitleFont = new("Bahnschrift SemiBold", 19F, FontStyle.Bold);
+    private static readonly Font StatusFont = new("Microsoft YaHei UI", 8.5F);
+    private static readonly Font MicroFont = new("Bahnschrift", 8F, FontStyle.Bold);
+    private static readonly Font HintFont = new("Bahnschrift", 7.5F);
+    private static readonly Font PanelTitleFont = new("Microsoft YaHei UI", 16F, FontStyle.Bold);
+    private static readonly Font MetaFont = new("Bahnschrift", 8.5F);
+    private static readonly Font BodyBoldFont = new("Microsoft YaHei UI", 8.5F, FontStyle.Bold);
+    private static readonly Font SectionFont = new("Microsoft YaHei UI", 12.5F, FontStyle.Bold);
+    private static readonly Font SyncFont = new("Bahnschrift", 7.5F);
+    private static readonly Font ButtonFont = new("Microsoft YaHei UI", 9F, FontStyle.Bold);
+
+    private const int ContentSlideOffset = 10;
 
     private readonly PiWebProcessManager service = new();
     private readonly BrowserApp browser = new();
@@ -25,10 +47,10 @@ internal sealed class LauncherForm : Form
     private readonly Label agentLabel = new();
     private readonly Label accountsUpdatedLabel = new();
     private readonly FlowLayoutPanel accountsList = new();
-    private readonly Button collapseButton = new();
-    private readonly Button startButton = new();
-    private readonly Button openButton = new();
-    private readonly Button stopButton = new();
+    private readonly SmoothButton collapseButton = new();
+    private readonly SmoothButton startButton = new();
+    private readonly SmoothButton openButton = new();
+    private readonly SmoothButton stopButton = new();
     private readonly System.Windows.Forms.Timer refreshTimer = new() { Interval = 1000 };
     private readonly ContextMenuStrip contextMenu = new();
     private readonly ContextMenuStrip trayMenu = new();
@@ -37,6 +59,26 @@ internal sealed class LauncherForm : Form
     private readonly ToolStripMenuItem trayOpenItem = new("打开界面");
     private readonly ToolStripMenuItem trayStopItem = new("停止 Pi Web");
 
+    private readonly ValueAnimator boundsAnimator = new()
+    {
+        Duration = TimeSpan.FromMilliseconds(230),
+        Ease = Easing.OutQuart,
+    };
+    private readonly ValueAnimator contentAnimator = new()
+    {
+        Duration = TimeSpan.FromMilliseconds(150),
+        Ease = Easing.OutCubic,
+    };
+    private readonly ValueAnimator fadeAnimator = new()
+    {
+        Duration = TimeSpan.FromMilliseconds(180),
+        Ease = Easing.OutCubic,
+    };
+
+    private Rectangle boundsStart;
+    private Rectangle boundsTarget;
+    private Point iconAnchorScreen;
+    private bool expanding;
     private bool expanded;
     private bool expandsLeft;
     private bool closing;
@@ -58,6 +100,7 @@ internal sealed class LauncherForm : Form
         Font = new Font("Microsoft YaHei UI", 9F);
         KeyPreview = true;
         Size = CollapsedSize;
+        Opacity = 0;
 
         BuildLayout();
         BuildTrayIcon();
@@ -99,17 +142,18 @@ internal sealed class LauncherForm : Form
         {
             Location = new Point(0, 0),
             Size = new Size(4, ExpandedSize.Height),
-            BackColor = Color.FromArgb(34, 39, 45),
+            BackColor = Color.FromArgb(30, 35, 41),
         });
 
         titleLabel.Text = "PIX";
-        titleLabel.Font = new Font("Bahnschrift SemiBold", 18F, FontStyle.Bold);
+        titleLabel.Font = TitleFont;
+        titleLabel.ForeColor = Ink;
         titleLabel.AutoSize = true;
         statusLabel.AutoSize = true;
         statusLabel.ForeColor = Muted;
-        statusLabel.Font = new Font("Microsoft YaHei UI", 8.5F);
+        statusLabel.Font = StatusFont;
 
-        ConfigureButton(collapseButton, "收起", new Size(58, 30), secondary: true);
+        ConfigureButton(collapseButton, "收起", new Size(56, 30), primary: false);
         collapseButton.Click += (_, _) => Collapse();
 
         BuildStoppedPanel();
@@ -129,36 +173,37 @@ internal sealed class LauncherForm : Form
 
         var stateCode = new Label
         {
-            Text = "CONTROL PLANE / OFFLINE",
-            Font = new Font("Bahnschrift", 8F, FontStyle.Bold),
-            ForeColor = Color.FromArgb(137, 145, 155),
+            Text = "CONTROL PLANE · OFFLINE",
+            Font = MicroFont,
+            ForeColor = Faint,
             AutoSize = true,
-            Location = new Point(0, 42),
+            Location = new Point(0, 6),
         };
         var stoppedTitle = new Label
         {
             Text = "Pi Web 尚未启动",
-            Font = new Font("Microsoft YaHei UI", 17F, FontStyle.Bold),
+            Font = PanelTitleFont,
             ForeColor = Ink,
             AutoSize = true,
-            Location = new Point(-1, 72),
+            Location = new Point(-1, 34),
         };
         var readyLine = new Panel
         {
-            Location = new Point(0, 119),
+            Location = new Point(0, 78),
             Size = new Size(372, 1),
-            BackColor = Color.FromArgb(218, 222, 227),
+            BackColor = Hairline,
         };
-        ConfigureButton(startButton, "启动 Pi Web", new Size(372, 44), secondary: false);
-        startButton.Location = new Point(0, 144);
+        ConfigureButton(startButton, "启动 Pi Web", new Size(372, 46), primary: true);
+        startButton.Location = new Point(0, 100);
+        startButton.CornerRadius = 10;
 
         var footnote = new Label
         {
-            Text = "LOCALHOST  ·  ISOLATED BROWSER  ·  PROCESS GUARD",
-            Font = new Font("Bahnschrift", 7.5F),
-            ForeColor = Color.FromArgb(151, 157, 165),
+            Text = "LOCAL  ·  ISOLATED  ·  GUARDED",
+            Font = HintFont,
+            ForeColor = Faint,
             AutoSize = true,
-            Location = new Point(0, 207),
+            Location = new Point(0, 164),
         };
         stoppedPanel.Controls.AddRange([stateCode, stoppedTitle, readyLine, startButton, footnote]);
     }
@@ -171,35 +216,35 @@ internal sealed class LauncherForm : Form
         serviceMetaLabel.AutoSize = true;
         serviceMetaLabel.Location = new Point(0, 2);
         serviceMetaLabel.ForeColor = Muted;
-        serviceMetaLabel.Font = new Font("Bahnschrift", 8.5F);
+        serviceMetaLabel.Font = MetaFont;
         agentLabel.AutoSize = true;
         agentLabel.Location = new Point(0, 27);
         agentLabel.ForeColor = Ink;
-        agentLabel.Font = new Font("Microsoft YaHei UI", 8.5F, FontStyle.Bold);
+        agentLabel.Font = BodyBoldFont;
 
-        ConfigureButton(openButton, "打开界面", new Size(238, 36), secondary: false);
+        ConfigureButton(openButton, "打开界面", new Size(238, 36), primary: true);
         openButton.Location = new Point(0, 55);
-        ConfigureButton(stopButton, "停止", new Size(124, 36), secondary: true);
+        ConfigureButton(stopButton, "停止", new Size(124, 36), primary: false);
         stopButton.Location = new Point(248, 55);
-        stopButton.ForeColor = Danger;
+        stopButton.SetPalette(Color.White, ButtonHover, ButtonPress, Danger, Danger);
 
         var separator = new Panel
         {
-            BackColor = Color.FromArgb(218, 222, 227),
+            BackColor = Hairline,
             Location = new Point(0, 110),
             Size = new Size(372, 1),
         };
         var accountsTitle = new Label
         {
             Text = "余额与额度",
-            Font = new Font("Microsoft YaHei UI", 13F, FontStyle.Bold),
+            Font = SectionFont,
             ForeColor = Ink,
             AutoSize = true,
             Location = new Point(0, 127),
         };
         accountsUpdatedLabel.AutoSize = true;
         accountsUpdatedLabel.ForeColor = Muted;
-        accountsUpdatedLabel.Font = new Font("Bahnschrift", 7.5F);
+        accountsUpdatedLabel.Font = SyncFont;
         accountsUpdatedLabel.Location = new Point(0, 158);
 
         accountsList.Location = new Point(0, 184);
@@ -254,6 +299,12 @@ internal sealed class LauncherForm : Form
         FormClosing += OnFormClosing;
         Resize += (_, _) => ApplyWindowShape();
         KeyDown += (_, eventArgs) => { if (eventArgs.KeyCode == Keys.Escape) Collapse(); };
+        Shown += (_, _) => fadeAnimator.Start();
+
+        fadeAnimator.Progressed += t => Opacity = t;
+        boundsAnimator.Progressed += OnBoundsProgress;
+        boundsAnimator.Completed += OnBoundsCompleted;
+        contentAnimator.Progressed += t => contentPanel.Top = PaintLerp.Lerp(ContentSlideOffset, 0, t);
     }
 
     private void RestoreInitialPosition()
@@ -267,7 +318,7 @@ internal sealed class LauncherForm : Form
 
     private void OnIconMouseDown(object? sender, MouseEventArgs eventArgs)
     {
-        if (eventArgs.Button != MouseButtons.Left) return;
+        if (eventArgs.Button != MouseButtons.Left || boundsAnimator.IsRunning) return;
         pointerMoved = false;
         pointerDownScreen = Cursor.Position;
         formDownLocation = Location;
@@ -276,7 +327,7 @@ internal sealed class LauncherForm : Form
 
     private void OnIconMouseMove(object? sender, MouseEventArgs eventArgs)
     {
-        if (!floatingIcon.Capture || eventArgs.Button != MouseButtons.Left) return;
+        if (!floatingIcon.Capture || eventArgs.Button != MouseButtons.Left || boundsAnimator.IsRunning) return;
         var delta = new Size(Cursor.Position.X - pointerDownScreen.X, Cursor.Position.Y - pointerDownScreen.Y);
         if (Math.Abs(delta.Width) + Math.Abs(delta.Height) > 4) pointerMoved = true;
         Location = new Point(formDownLocation.X + delta.Width, formDownLocation.Y + delta.Height);
@@ -299,7 +350,7 @@ internal sealed class LauncherForm : Form
 
     private void Expand()
     {
-        if (expanded) return;
+        if (expanded || boundsAnimator.IsRunning) return;
         var iconScreenLocation = GetCollapsedIconScreenLocation();
         var area = Screen.FromPoint(iconScreenLocation).WorkingArea;
         var collapsedLeft = iconScreenLocation.X - 4;
@@ -308,21 +359,71 @@ internal sealed class LauncherForm : Form
         var roomLeft = collapsedRight - area.Left;
         expandsLeft = roomRight < ExpandedSize.Width && roomLeft >= roomRight;
 
+        expanding = true;
         expanded = true;
-        Size = ExpandedSize;
-        floatingIcon.Location = expandsLeft
-            ? new Point(ExpandedSize.Width - 60, 4)
-            : new Point(4, 4);
-        Location = new Point(
-            iconScreenLocation.X - floatingIcon.Location.X,
-            iconScreenLocation.Y - floatingIcon.Location.Y);
+        iconAnchorScreen = iconScreenLocation;
+        var iconOffset = expandsLeft ? new Point(ExpandedSize.Width - 60, 4) : new Point(4, 4);
+        var targetLocation = new Point(iconAnchorScreen.X - iconOffset.X, iconAnchorScreen.Y - iconOffset.Y);
+        targetLocation.X = Math.Clamp(targetLocation.X, area.Left, Math.Max(area.Left, area.Right - ExpandedSize.Width));
+        targetLocation.Y = Math.Clamp(targetLocation.Y, area.Top, Math.Max(area.Top, area.Bottom - ExpandedSize.Height));
+        boundsStart = Bounds;
+        boundsTarget = new Rectangle(targetLocation, ExpandedSize);
         LayoutHeaderForDirection();
+        contentPanel.Visible = false;
+        boundsAnimator.Start();
+    }
+
+    private void Collapse()
+    {
+        if (!expanded || boundsAnimator.IsRunning) return;
+        expanding = false;
+        expanded = false;
+        contentAnimator.Stop();
+        contentPanel.Visible = false;
+        iconAnchorScreen = PointToScreen(floatingIcon.Location);
+        boundsStart = Bounds;
+        boundsTarget = new Rectangle(new Point(iconAnchorScreen.X - 4, iconAnchorScreen.Y - 4), CollapsedSize);
+        boundsAnimator.Start();
+    }
+
+    private void OnBoundsProgress(double t)
+    {
+        var x = PaintLerp.Lerp(boundsStart.X, boundsTarget.X, t);
+        var y = PaintLerp.Lerp(boundsStart.Y, boundsTarget.Y, t);
+        var width = PaintLerp.Lerp(boundsStart.Width, boundsTarget.Width, t);
+        var height = PaintLerp.Lerp(boundsStart.Height, boundsTarget.Height, t);
+        SetBounds(x, y, width, height);
+        floatingIcon.Location = new Point(iconAnchorScreen.X - x, iconAnchorScreen.Y - y);
+        if (expanding && !contentPanel.Visible && t >= 0.6)
+        {
+            ShowContentAnimated();
+        }
+    }
+
+    private void OnBoundsCompleted()
+    {
+        SetBounds(boundsTarget.X, boundsTarget.Y, boundsTarget.Width, boundsTarget.Height);
+        if (expanding)
+        {
+            if (!contentPanel.Visible) ShowContentAnimated();
+            nextAccountRefresh = DateTimeOffset.MinValue;
+            _ = RefreshStatusAsync();
+        }
+        else
+        {
+            floatingIcon.Location = new Point(4, 4);
+            Location = ClampCollapsedLocation(boundsTarget.Location);
+            LauncherPlacement.Save(Location);
+        }
+    }
+
+    private void ShowContentAnimated()
+    {
+        contentPanel.Top = ContentSlideOffset;
         contentPanel.Visible = true;
         contentPanel.SendToBack();
-        KeepWindowOnScreen();
-        ApplyWindowShape();
-        nextAccountRefresh = DateTimeOffset.MinValue;
-        _ = RefreshStatusAsync();
+        floatingIcon.BringToFront();
+        contentAnimator.Start();
     }
 
     private void LayoutHeaderForDirection()
@@ -330,29 +431,16 @@ internal sealed class LauncherForm : Form
         if (expandsLeft)
         {
             titleLabel.Location = new Point(24, 14);
-            statusLabel.Location = new Point(26, 49);
+            statusLabel.Location = new Point(26, 50);
             collapseButton.Location = new Point(282, 17);
         }
         else
         {
             titleLabel.Location = new Point(78, 14);
-            statusLabel.Location = new Point(80, 49);
+            statusLabel.Location = new Point(80, 50);
             collapseButton.Location = new Point(338, 17);
         }
         floatingIcon.BringToFront();
-    }
-
-    private void Collapse()
-    {
-        if (!expanded) return;
-        var iconScreenLocation = PointToScreen(floatingIcon.Location);
-        expanded = false;
-        contentPanel.Visible = false;
-        Size = CollapsedSize;
-        floatingIcon.Location = new Point(4, 4);
-        Location = ClampCollapsedLocation(new Point(iconScreenLocation.X - 4, iconScreenLocation.Y - 4));
-        ApplyWindowShape();
-        LauncherPlacement.Save(Location);
     }
 
     private async Task StartServiceAsync()
@@ -435,7 +523,7 @@ internal sealed class LauncherForm : Form
             ? FloatingIconControl.ServiceVisualState.Starting
             : FloatingIconControl.ServiceVisualState.Running;
         statusLabel.Text = health is null ? "CONNECTING" : "SERVICE ONLINE";
-        statusLabel.ForeColor = health is null ? Color.FromArgb(190, 127, 30) : Signal;
+        statusLabel.ForeColor = health is null ? Amber : Signal;
         stoppedPanel.Visible = false;
         runningPanel.Visible = true;
         serviceMetaLabel.Text = $"PID {service.ProcessId ?? 0}   PORT {service.Port ?? 0}";
@@ -463,22 +551,33 @@ internal sealed class LauncherForm : Form
 
     private void RenderAccounts(LauncherStatusSnapshot? snapshot)
     {
-        accountsList.SuspendLayout();
-        accountsList.Controls.Clear();
         if (snapshot is null)
         {
             accountsUpdatedLabel.Text = "SYNC FAILED · 自动重试";
+            return;
         }
-        else
+
+        accountsUpdatedLabel.Text = $"SYNC {DateTime.Now:HH:mm:ss}";
+        accountsList.SuspendLayout();
+        var reused = accountsList.Controls.OfType<ProviderAccountControl>()
+            .ToDictionary(control => (string)control.Tag!);
+        var ordered = new List<ProviderAccountControl>(snapshot.Providers.Count);
+        foreach (var provider in snapshot.Providers)
         {
-            accountsUpdatedLabel.Text = $"SYNC {DateTime.Now:HH:mm:ss}";
-            foreach (var provider in snapshot.Providers)
+            if (!reused.TryGetValue(provider.Id, out var control))
             {
-                var control = new ProviderAccountControl();
-                control.SetSnapshot(provider);
-                accountsList.Controls.Add(control);
+                control = new ProviderAccountControl { Tag = provider.Id };
             }
+            else
+            {
+                reused.Remove(provider.Id);
+            }
+            control.SetSnapshot(provider);
+            ordered.Add(control);
         }
+        foreach (var leftover in reused.Values) leftover.Dispose();
+        accountsList.Controls.Clear();
+        accountsList.Controls.AddRange(ordered.ToArray());
         accountsList.ResumeLayout();
     }
 
@@ -550,58 +649,53 @@ internal sealed class LauncherForm : Form
 
     private void ApplyWindowShape()
     {
+        var t = Math.Clamp(
+            (Width - CollapsedSize.Width) / (double)(ExpandedSize.Width - CollapsedSize.Width), 0, 1);
         using var path = new GraphicsPath();
-        if (!expanded)
+        if (t <= 0.001)
         {
             path.AddEllipse(ClientRectangle);
         }
         else
         {
-            const int radius = 12;
-            path.AddArc(0, 0, radius, radius, 180, 90);
-            path.AddArc(Width - radius - 1, 0, radius, radius, 270, 90);
-            path.AddArc(Width - radius - 1, Height - radius - 1, radius, radius, 0, 90);
-            path.AddArc(0, Height - radius - 1, radius, radius, 90, 90);
+            var radius = PaintLerp.Lerp(Math.Min(Width, Height) / 2, 13, t);
+            var diameter = Math.Min(radius * 2, Math.Min(Width, Height) - 1);
+            path.AddArc(0, 0, diameter, diameter, 180, 90);
+            path.AddArc(Width - diameter - 1, 0, diameter, diameter, 270, 90);
+            path.AddArc(Width - diameter - 1, Height - diameter - 1, diameter, diameter, 0, 90);
+            path.AddArc(0, Height - diameter - 1, diameter, diameter, 90, 90);
             path.CloseFigure();
         }
+
+        var old = Region;
         Region = new Region(path);
+        old?.Dispose();
     }
 
-    private static void ConfigureButton(Button button, string text, Size size, bool secondary)
+    private static void ConfigureButton(SmoothButton button, string text, Size size, bool primary)
     {
         button.Text = text;
         button.Size = size;
-        button.FlatStyle = FlatStyle.Flat;
-        button.FlatAppearance.BorderColor = secondary
-            ? Color.FromArgb(210, 215, 221)
-            : Color.FromArgb(26, 30, 35);
-        button.FlatAppearance.MouseOverBackColor = secondary
-            ? Color.FromArgb(236, 239, 241)
-            : Color.FromArgb(45, 51, 58);
-        button.BackColor = secondary ? Color.White : Ink;
-        button.ForeColor = secondary ? Color.FromArgb(70, 77, 87) : Color.White;
-        button.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
-        button.Cursor = Cursors.Hand;
-        using var path = RoundedRectangle(new Rectangle(Point.Empty, size), 6);
-        button.Region = new Region(path);
-    }
-
-    private static GraphicsPath RoundedRectangle(Rectangle rectangle, int radius)
-    {
-        var diameter = radius * 2;
-        var path = new GraphicsPath();
-        path.AddArc(rectangle.Left, rectangle.Top, diameter, diameter, 180, 90);
-        path.AddArc(rectangle.Right - diameter, rectangle.Top, diameter, diameter, 270, 90);
-        path.AddArc(rectangle.Right - diameter, rectangle.Bottom - diameter, diameter, diameter, 0, 90);
-        path.AddArc(rectangle.Left, rectangle.Bottom - diameter, diameter, diameter, 90, 90);
-        path.CloseFigure();
-        return path;
+        button.Font = ButtonFont;
+        if (primary)
+        {
+            button.FlatAppearance.BorderSize = 0;
+            button.SetPalette(Ink, InkHover, InkPress, Color.White, Color.White);
+        }
+        else
+        {
+            button.FlatAppearance.BorderColor = ButtonBorder;
+            button.SetPalette(Color.White, ButtonHover, ButtonPress, Color.FromArgb(70, 77, 87), Ink);
+        }
     }
 
     private async Task ExitAsync()
     {
         if (closing) return;
         closing = true;
+        boundsAnimator.Stop();
+        contentAnimator.Stop();
+        fadeAnimator.Stop();
         refreshTimer.Stop();
         Enabled = false;
         LauncherPlacement.Save(GetPersistedCollapsedLocation());
@@ -621,6 +715,18 @@ internal sealed class LauncherForm : Form
         if (closing) return;
         eventArgs.Cancel = true;
         await ExitAsync();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            boundsAnimator.Dispose();
+            contentAnimator.Dispose();
+            fadeAnimator.Dispose();
+            refreshTimer.Dispose();
+        }
+        base.Dispose(disposing);
     }
 
     [DllImport("user32.dll", SetLastError = true)]

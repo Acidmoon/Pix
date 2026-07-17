@@ -5,13 +5,26 @@ namespace Pix.Launcher;
 /// <summary>Paints one provider balance or quota summary as a compact instrument panel.</summary>
 internal sealed class ProviderAccountControl : Control
 {
-    private static readonly Color Ink = Color.FromArgb(27, 31, 36);
-    private static readonly Color Muted = Color.FromArgb(105, 112, 121);
-    private static readonly Color Border = Color.FromArgb(222, 226, 231);
-    private static readonly Color Signal = Color.FromArgb(44, 190, 116);
-    private static readonly Color Warning = Color.FromArgb(221, 151, 42);
-    private static readonly Color Danger = Color.FromArgb(207, 74, 69);
+    private static readonly Color Ink = Color.FromArgb(24, 28, 33);
+    private static readonly Color Muted = Color.FromArgb(101, 110, 120);
+    private static readonly Color Border = Color.FromArgb(228, 231, 235);
+    private static readonly Color Track = Color.FromArgb(234, 237, 240);
+    private static readonly Color Signal = Color.FromArgb(34, 176, 108);
+    private static readonly Color Warning = Color.FromArgb(214, 146, 42);
+    private static readonly Color Danger = Color.FromArgb(199, 72, 65);
 
+    private static readonly Font TitleFont = new("Microsoft YaHei UI", 10F, FontStyle.Bold);
+    private static readonly Font StatusFont = new("Bahnschrift", 7.5F, FontStyle.Bold);
+    private static readonly Font AmountFont = new("Bahnschrift SemiBold", 22F);
+    private static readonly Font CaptionFont = new("Microsoft YaHei UI", 8.5F, FontStyle.Bold);
+    private static readonly Font DetailFont = new("Microsoft YaHei UI", 8.5F);
+    private static readonly Font TierLabelFont = new("Microsoft YaHei UI", 8.5F, FontStyle.Bold);
+    private static readonly Font TierValueFont = new("Bahnschrift SemiBold", 10F);
+    private static readonly Font ResetTextFont = new("Microsoft YaHei UI", 7.5F);
+
+    private readonly MotionTicker ticker;
+    private readonly double[] displayedPercents = new double[2];
+    private readonly double[] targetPercents = new double[2];
     private ProviderAccountSnapshot? snapshot;
 
     public ProviderAccountControl()
@@ -22,12 +35,44 @@ internal sealed class ProviderAccountControl : Control
         Height = 126;
         Margin = new Padding(0, 0, 0, 8);
         BackColor = Color.Transparent;
+        ticker = new MotionTicker();
+        ticker.Tick += dt => StepMotion(dt);
     }
 
     public void SetSnapshot(ProviderAccountSnapshot value)
     {
         snapshot = value;
+        for (var index = 0; index < targetPercents.Length; index++)
+        {
+            targetPercents[index] = value.Tiers is { Count: > 0 } && index < value.Tiers.Count
+                ? Math.Clamp(value.Tiers[index].RemainingPercent, 0, 100)
+                : 0;
+        }
         Height = value.Tiers is { Count: > 1 } ? 160 : 126;
+        if (!IsSettled()) ticker.EnsureRunning();
+        Invalidate();
+    }
+
+    private bool IsSettled()
+    {
+        for (var index = 0; index < targetPercents.Length; index++)
+        {
+            if (Math.Abs(displayedPercents[index] - targetPercents[index]) > 0.05) return false;
+        }
+        return true;
+    }
+
+    private void StepMotion(double dt)
+    {
+        for (var index = 0; index < targetPercents.Length; index++)
+        {
+            displayedPercents[index] = MotionStep.Approach(displayedPercents[index], targetPercents[index], dt, 9);
+        }
+        if (IsSettled())
+        {
+            Array.Copy(targetPercents, displayedPercents, targetPercents.Length);
+            ticker.Stop();
+        }
         Invalidate();
     }
 
@@ -36,7 +81,7 @@ internal sealed class ProviderAccountControl : Control
         base.OnPaint(eventArgs);
         var graphics = eventArgs.Graphics;
         graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        using var surfacePath = RoundedRectangle(new Rectangle(0, 0, Width - 1, Height - 1), 8);
+        using var surfacePath = RoundedRectangle(new Rectangle(0, 0, Width - 1, Height - 1), 10);
         using var surface = new SolidBrush(Color.White);
         using var borderPen = new Pen(Border);
         graphics.FillPath(surface, surfacePath);
@@ -58,7 +103,7 @@ internal sealed class ProviderAccountControl : Control
         }
     }
 
-    private static void DrawHeader(Graphics graphics, ProviderAccountSnapshot value)
+    private void DrawHeader(Graphics graphics, ProviderAccountSnapshot value)
     {
         var statusColor = value.Status switch
         {
@@ -67,10 +112,9 @@ internal sealed class ProviderAccountControl : Control
             _ => Color.FromArgb(158, 165, 174),
         };
         using var dotBrush = new SolidBrush(statusColor);
-        graphics.FillEllipse(dotBrush, 17, 18, 7, 7);
-        using var titleFont = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold);
+        graphics.FillEllipse(dotBrush, 18, 19, 7, 7);
         using var titleBrush = new SolidBrush(Ink);
-        graphics.DrawString(value.DisplayName, titleFont, titleBrush, 31, 12);
+        graphics.DrawString(value.DisplayName, TitleFont, titleBrush, 32, 12);
 
         var statusText = value.Status switch
         {
@@ -78,38 +122,33 @@ internal sealed class ProviderAccountControl : Control
             "error" => "ERROR",
             _ => "NOT SET",
         };
-        using var statusFont = new Font("Bahnschrift", 8F, FontStyle.Bold);
         using var statusBrush = new SolidBrush(statusColor);
-        var statusSize = graphics.MeasureString(statusText, statusFont);
-        graphics.DrawString(statusText, statusFont, statusBrush, WidthFor(graphics) - statusSize.Width - 16, 13);
+        var statusSize = graphics.MeasureString(statusText, StatusFont);
+        graphics.DrawString(statusText, StatusFont, statusBrush, Width - statusSize.Width - 18, 14);
     }
 
     private static void DrawUnavailable(Graphics graphics, ProviderAccountSnapshot value)
     {
-        using var messageFont = new Font("Microsoft YaHei UI", 9F);
         using var messageBrush = new SolidBrush(value.Status == "error" ? Danger : Muted);
-        graphics.DrawString(value.Message ?? "暂时无法查询", messageFont, messageBrush, new RectangleF(17, 52, 320, 55));
+        graphics.DrawString(value.Message ?? "暂时无法查询", DetailFont, messageBrush, new RectangleF(18, 52, 320, 55));
     }
 
     private static void DrawBalance(Graphics graphics, ProviderAccountSnapshot value)
     {
         var balance = value.Balances![0];
         var symbol = balance.Currency switch { "CNY" => "¥", "USD" => "$", _ => $"{balance.Currency} " };
-        using var amountFont = new Font("Bahnschrift SemiBold", 24F);
         using var amountBrush = new SolidBrush(Ink);
-        graphics.DrawString($"{symbol}{balance.Total:N2}", amountFont, amountBrush, 15, 42);
+        graphics.DrawString($"{symbol}{balance.Total:N2}", AmountFont, amountBrush, 16, 42);
 
         var availability = value.IsAvailable == false ? "余额不足" : "可用余额";
-        using var captionFont = new Font("Microsoft YaHei UI", 8.5F, FontStyle.Bold);
         using var captionBrush = new SolidBrush(value.IsAvailable == false ? Danger : Signal);
-        graphics.DrawString(availability, captionFont, captionBrush, 18, 91);
+        graphics.DrawString(availability, CaptionFont, captionBrush, 19, 91);
 
-        using var detailFont = new Font("Microsoft YaHei UI", 8.5F);
         using var detailBrush = new SolidBrush(Muted);
-        graphics.DrawString($"充值 {symbol}{balance.ToppedUp:N2}   赠送 {symbol}{balance.Granted:N2}", detailFont, detailBrush, 99, 91);
+        graphics.DrawString($"充值 {symbol}{balance.ToppedUp:N2}   赠送 {symbol}{balance.Granted:N2}", DetailFont, detailBrush, 100, 91);
     }
 
-    private static void DrawQuota(Graphics graphics, ProviderAccountSnapshot value)
+    private void DrawQuota(Graphics graphics, ProviderAccountSnapshot value)
     {
         if (value.Tiers is not { Count: > 0 })
         {
@@ -118,35 +157,34 @@ internal sealed class ProviderAccountControl : Control
         }
 
         var y = 48;
+        var index = 0;
         foreach (var tier in value.Tiers.Take(2))
         {
-            DrawQuotaTier(graphics, tier, y);
+            DrawQuotaTier(graphics, tier, displayedPercents[index], y);
+            index++;
             y += 60;
         }
     }
 
-    private static void DrawQuotaTier(Graphics graphics, QuotaTierSnapshot tier, int y)
+    private void DrawQuotaTier(Graphics graphics, QuotaTierSnapshot tier, double remaining, int y)
     {
-        var remaining = Math.Clamp(tier.RemainingPercent, 0, 100);
         var signalColor = remaining switch
         {
             > 50 => Signal,
             > 20 => Warning,
             _ => Danger,
         };
-        using var labelFont = new Font("Microsoft YaHei UI", 8.5F, FontStyle.Bold);
         using var labelBrush = new SolidBrush(Ink);
-        graphics.DrawString(tier.Label, labelFont, labelBrush, 17, y);
+        graphics.DrawString(tier.Label, TierLabelFont, labelBrush, 18, y);
 
-        using var valueFont = new Font("Bahnschrift SemiBold", 10F);
         using var valueBrush = new SolidBrush(signalColor);
         var percentageText = $"{remaining:0.#}%";
-        var valueSize = graphics.MeasureString(percentageText, valueFont);
-        graphics.DrawString(percentageText, valueFont, valueBrush, WidthFor(graphics) - valueSize.Width - 17, y - 1);
+        var valueSize = graphics.MeasureString(percentageText, TierValueFont);
+        graphics.DrawString(percentageText, TierValueFont, valueBrush, Width - valueSize.Width - 18, y - 1);
 
-        var track = new Rectangle(17, y + 23, WidthFor(graphics) - 34, 6);
+        var track = new Rectangle(18, y + 23, Width - 36, 6);
         using var trackPath = RoundedRectangle(track, 3);
-        using var trackBrush = new SolidBrush(Color.FromArgb(233, 236, 239));
+        using var trackBrush = new SolidBrush(Track);
         graphics.FillPath(trackBrush, trackPath);
         var fillWidth = (int)Math.Round(track.Width * remaining / 100D);
         if (fillWidth > 0)
@@ -158,13 +196,16 @@ internal sealed class ProviderAccountControl : Control
 
         if (DateTimeOffset.TryParse(tier.ResetsAt, out var resetAt))
         {
-            using var resetFont = new Font("Microsoft YaHei UI", 7.5F);
             using var resetBrush = new SolidBrush(Muted);
-            graphics.DrawString($"重置 {resetAt.ToLocalTime():MM-dd HH:mm}", resetFont, resetBrush, 17, y + 34);
+            graphics.DrawString($"重置 {resetAt.ToLocalTime():MM-dd HH:mm}", ResetTextFont, resetBrush, 18, y + 34);
         }
     }
 
-    private static int WidthFor(Graphics graphics) => (int)graphics.VisibleClipBounds.Width;
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) ticker.Dispose();
+        base.Dispose(disposing);
+    }
 
     private static GraphicsPath RoundedRectangle(Rectangle rectangle, int radius)
     {
