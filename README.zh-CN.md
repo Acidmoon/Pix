@@ -1,64 +1,97 @@
-# pi-web
+# Pix
 
 [English](./README.md)
 
-[pi 编程智能体](https://github.com/badlogic/pi-mono) 的本地网页界面。它会读取本机的 pi 会话文件，在浏览器里提供会话管理、实时对话、模型配置、技能管理和项目文件预览。
+Pix 是 [pi 编程智能体](https://github.com/badlogic/pi-mono) 的 Windows 桌面伴侣，包含两个部分：
 
-## 快速开始
+- **pi-web** —— pi 的本地网页界面（fork 自 [agegr/pi-web](https://github.com/agegr/pi-web)）：会话管理、实时对话、模型配置、技能管理和项目文件预览。
+- **Pix Launcher（启动器）** —— 原生 Windows 控制平面：以悬浮球形态常驻桌面，一键启动 pi-web 服务，并在弹层面板里展示已配置模型的余额与订阅额度。
 
-**无需安装，直接运行：**
+![浏览器里的 Pi Web](https://raw.githubusercontent.com/Acidmoon/Pix/dev/docs/screenshot2.png)
+
+## Pix 启动器
+
+启动器是 Pix 区别于原版 pi-web 的部分——一个安静的 WinForms 小部件：
+
+- **悬浮球**：可拖动、永远置顶的深色圆球。点击后深色卫星面板在旁边淡入滑出，球体本身全程零重绘、不移动。
+- **一键服务控制**：在随机回环端口启动/停止 pi-web，等待健康检查就绪后，自动打开独立的 Edge/Chrome `--app` 窗口。
+- **浏览器吸附**：应用窗口打开后，悬浮球会滑到窗口右边缘磁吸跟随；手动拖球即脱离，位置自动记忆。
+- **余额与额度面板**：一眼看清账户余量——
+  - DeepSeek：分币种显示总额 / 充值 / 赠送余额
+  - MiniMax 编程套餐（国内与国际站）：5 小时窗口与 7 天窗口的剩余百分比和重置时间
+- **服务状态**：PID、端口、活跃 AgentSession 数；系统托盘菜单镜像全部控制项。
+- **细节体验**：150–240ms 的克制动画、隐藏式滚动条、固定的专用浏览器 profile（扩展和登录态持久保留，不再每次启动重复弹首次运行窗口）、与悬浮球统一的应用图标。
+
+## 运行环境
+
+- Windows 10/11
+- `PATH` 上可用的 [Node.js](https://nodejs.org/)
+- [.NET 8 桌面运行时](https://dotnet.microsoft.com/download)（仅启动器需要；从源码构建则需要 .NET 8 SDK）
+
+## 开始使用
+
+### 方式 A：只用 pi-web
+
+pi-web 可以脱离启动器在全平台独立运行：
 
 ```bash
 npx @agegr/pi-web@latest
-```
-
-**或全局安装后使用：**
-
-```bash
+# 或
 npm install -g @agegr/pi-web
 pi-web
 ```
 
-启动后打开 [http://localhost:30141](http://localhost:30141)。命令行版本会在服务就绪后尝试自动打开浏览器。
+然后打开 [http://localhost:30141](http://localhost:30141)。
 
-**可选参数：**
+### 方式 B：从源码构建 Pix（pi-web + 启动器）
 
-```bash
-pi-web --port 8080              # 自定义端口
-pi-web --hostname 127.0.0.1     # 仅本机访问
-pi-web -p 8080 -H 127.0.0.1     # 组合使用
-pi-web --no-open                # 不自动打开浏览器
+```powershell
+# 1. 安装依赖并构建 pi-web（生产构建）
+npm install
+npm run build
 
-PORT=8080 pi-web                # 也支持环境变量
-PI_WEB_NO_OPEN=1 pi-web         # 适用于后台服务或开机自启
+# 2. 构建启动器
+dotnet build .\launcher\PixLauncher.csproj -c Release
+
+# 3. 运行——它会从自身位置向上查找 bin\pi-web.js
+.\launcher\bin\Release\net8.0-windows\PixLauncher.exe
 ```
 
-## 功能介绍
+如果启动器放在仓库之外的目录，用环境变量指向 pi-web 目录：
 
-- **把历史工作接回来**：打开网页就能按项目找到以前的 pi 对话，不必在终端里翻文件或记住会话路径。
-- **放心试不同方向**：可以从某条历史消息重新开始，也可以复制出一条独立的新路线，探索方案时不怕弄乱原来的对话。
-- **跨分支工作**：在侧边栏切换 Git worktree，让新会话和 Explorer 跟随你选择的 checkout。
-- **边聊边看项目文件**：左侧浏览项目文件，右侧打开源码、文档、图片、音频和 PDF；文件变化会自动刷新，适合边让 agent 改边检查结果。
-- **随时掌握会话状态**：在顶部就能看到上下文占用、花费、压缩结果和系统提示，长会话不再像黑箱。
-- **少离开当前界面**：模型、登录/API key、模型测试和技能开关都能在网页里处理，配置 agent 时不用在多个工具之间来回切换。
+```powershell
+$env:PI_WEB_ROOT = "E:\Pix"
+```
 
-## 注意事项
+[GitHub Releases](https://github.com/Acidmoon/Pix/releases) 附有打包好的启动器压缩包——里面只有启动器本身，仍需要一份 `npm run build` 出来的 pi-web 供它驱动。
 
-- **数据目录**：默认读取 `~/.pi/agent/sessions` 下的会话文件。可通过环境变量 `PI_CODING_AGENT_DIR` 指定其他 pi agent 目录。
-- **会话文件**：路径形如 `~/.pi/agent/sessions/<编码后的工作目录>/<时间戳>_<uuid>.jsonl`。
-- **模型配置**：Models 面板读写 pi agent 目录下的 `models.json`，模型列表和默认模型由 pi 的配置解析得到。
-- **文件访问**：文件浏览和预览面向当前选择的项目目录，以及会话中已出现过的工作目录。
-- **Git worktree**：什么时候显示切换器、新建目录在哪里、删除会影响什么，见 [pi-web 里的 Worktree](./docs/worktrees.zh-CN.md)。
-- **Fork 与会话内分支不同**：Fork 会创建新的 `.jsonl` 文件；“Edit from here” 是同一会话文件里的分支。
+## 架构关系
+
+```
+PixLauncher.exe（WinForms，控制平面）
+   │  仅回环 HTTP
+   │   GET  /api/health              （就绪探活，无鉴权）
+   │   GET  /api/launcher/status     （余额与额度，Bearer token）
+   │   POST /api/launcher/shutdown   （优雅关停，Bearer token）
+   ▼
+node bin/pi-web.js（Next.js 服务）
+   ▼
+Edge/Chrome --app 窗口（独立持久 profile）
+```
+
+- 两个进程不共享任何代码，启动器只通过 HTTP 与 pi-web 通信。
+- 每次启动生成随机的 `PI_WEB_LAUNCHER_TOKEN`；没有它，`/api/launcher/*` 一律 404——普通方式运行 pi-web（CLI、npx、dev server）不暴露任何特权接口。
+- 模型凭据通过 pi 自己的认证存储解析，只用于服务端向对应官方接口发起的请求，永远不会返回给启动器或浏览器。
 
 ## 开发
 
 ```bash
 npm install
-npm run dev
-```
+npm run dev          # pi-web 运行在 http://localhost:30141
 
-本地开发端口为 [http://localhost:30141](http://localhost:30141)。
+dotnet build .\launcher\PixLauncher.csproj
+dotnet run --project .\launcher\PixLauncher.csproj
+```
 
 常用检查：
 
@@ -67,46 +100,14 @@ node_modules/.bin/tsc --noEmit
 npm run lint
 ```
 
-开发时不要运行 `next build` / `npm run build`，它会写入 `.next/`，容易影响正在运行的 dev server。发布流程再执行构建。
+dev server 运行期间不要执行 `next build`，会污染 `.next/`。Windows 上做生产构建前请先隔离构建环境（见 [docs/launcher.md](./docs/launcher.md)）。
 
-## 项目结构
+## 文档
 
-```
-app/
-  api/
-    agent/          # 创建/驱动 AgentSession，提供 SSE 事件流
-    auth/           # OAuth 和 API key 管理
-    cwd/validate/   # 自定义工作目录校验
-    default-cwd/    # 获取 pi 默认工作目录
-    files/          # 文件列表、读取、预览、watch
-    home/           # 当前用户 home 目录
-    models/         # 可用模型、默认模型、thinking levels
-    models-config/  # 读写 models.json、测试模型
-    sessions/       # 会话读取、重命名、删除、上下文、HTML 导出
-    skills/         # skills 列表、搜索、安装、启停
-components/
-  AppShell.tsx        # 主布局、URL 状态、顶部面板、文件标签
-  SessionSidebar.tsx  # 项目选择、会话树、Explorer
-  ChatWindow.tsx      # 消息区、SSE、拖拽图片、minimap
-  ChatInput.tsx       # 输入栏、模型/工具/thinking/compact/slash controls
-  MessageView.tsx     # 消息、thinking、tool call/result 渲染
-  ModelsConfig.tsx    # 模型和认证配置面板
-  SkillsConfig.tsx    # 技能管理面板
-  FileExplorer.tsx    # 文件树
-  FileViewer.tsx      # 源码、diff、图片、音频、PDF、DOCX 预览
-lib/
-  rpc-manager.ts      # AgentSessionWrapper 生命周期和全局 registry
-  session-reader.ts   # 解析 .jsonl 会话文件和分支上下文
-  normalize.ts        # 规范化 toolCall 字段名
-  file-access.ts      # 文件读取安全边界
-  file-paths.ts       # 文件路径编码/相对路径工具
-  markdown.ts         # Markdown/Mermaid/KaTeX 插件配置
-  pi-types.ts         # pi 相关类型
-hooks/
-  useAgentSession.ts  # 会话加载、发送命令、SSE 状态机
-  useAudio.ts         # 完成提示音
-  useDragDrop.ts      # 图片拖拽
-  useTheme.ts         # 主题切换
-bin/
-  pi-web.js           # npm CLI 入口
-```
+- [启动器详解](./docs/launcher.md)——功能范围、安全模型、provider 适配器
+- [pi-web 里的 Worktree](./docs/worktrees.zh-CN.md)——侧边栏的分支切换
+- [AGENTS.md](./AGENTS.md)——架构说明与开发约定
+
+## 许可证
+
+MIT，与上游 [pi-web](https://github.com/agegr/pi-web) 一致。
