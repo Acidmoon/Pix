@@ -40,3 +40,12 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .factory
+
+# .NET launcher build output
+launcher/bin/
+launcher/obj/
+
+# Local installed runtime (kept beside the repository on request)
+/PixApp/
+/logs/
+/.build-home/

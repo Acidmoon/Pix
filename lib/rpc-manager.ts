@@ -886,6 +886,7 @@ declare global {
   var __piSessions: Map<string, AgentSessionWrapper> | undefined;
   var __piStartLocks: Map<string, Promise<{ session: AgentSessionWrapper; realSessionId: string }>> | undefined;
   var __piRunningListeners: Set<(ids: string[]) => void> | undefined;
+  var __piShuttingDown: boolean | undefined;
 }
 
 function getRegistry(): Map<string, AgentSessionWrapper> {
@@ -914,6 +915,30 @@ export function getRunningRpcSessionIds(): string[] {
     if (session.isRunning()) ids.add(session.sessionId || sessionId);
   }
   return [...ids];
+}
+
+/**
+ * Stop active work and release every in-process AgentSession before the web
+ * service exits. The shutdown flag also prevents a concurrent HTTP request
+ * from creating another session while cleanup is in progress.
+ */
+export async function shutdownAllRpcSessions(): Promise<void> {
+  globalThis.__piShuttingDown = true;
+
+  // Session creation performs asynchronous resource discovery. Wait for any
+  // creation already in flight so it cannot escape the cleanup snapshot.
+  const starts = [...getLocks().values()];
+  if (starts.length > 0) await Promise.allSettled(starts);
+
+  const sessions = [...getRegistry().values()];
+  await Promise.allSettled(sessions.map(async (session) => {
+    try {
+      if (session.isRunning()) await session.send({ type: "abort" });
+      await session.send({ type: "abort_compaction" });
+    } finally {
+      session.destroy();
+    }
+  }));
 }
 
 // ----------------------------------------------------------------------------
@@ -964,6 +989,10 @@ export async function startRpcSession(
   cwd: string,
   toolNames?: string[]
 ): Promise<{ session: AgentSessionWrapper; realSessionId: string }> {
+  if (globalThis.__piShuttingDown) {
+    throw new Error("Pi Web is shutting down");
+  }
+
   const registry = getRegistry();
   const locks = getLocks();
 

@@ -12,6 +12,16 @@ const { parseLaunchOptions } = require("./pi-web-options");
 
 const pkgDir = path.join(__dirname, "..");
 const nextDir = path.join(pkgDir, ".next");
+const serviceLogPath = process.env.PI_WEB_LOG_PATH;
+
+function writeServiceLog(message) {
+  if (!serviceLogPath) return;
+  try {
+    fs.appendFileSync(serviceLogPath, `[${new Date().toISOString()}] ${message}\n`, "utf8");
+  } catch {
+    // Diagnostics must never prevent the web service from starting.
+  }
+}
 
 // Resolve next's CLI entry directly to avoid relying on .bin symlinks (which
 // may not exist when installed via npx).
@@ -31,6 +41,7 @@ try {
 const { port, hostname, openBrowser } = parseLaunchOptions();
 
 if (!fs.existsSync(nextDir)) {
+  writeServiceLog(`Build artifacts not found at ${nextDir}`);
   console.error("Build artifacts not found. Please report this issue.");
   process.exit(1);
 }
@@ -42,16 +53,19 @@ if (hostname) nextArgs.push("-H", hostname);
 // and path-with-spaces problems on Windows when shell: true is used.
 const child = spawn(process.execPath, [nextBin, ...nextArgs], {
   cwd: pkgDir,
-  stdio: ["inherit", "pipe", "inherit"],
+  stdio: ["ignore", "pipe", "pipe"],
   env: { ...process.env },
 });
+
+writeServiceLog(`Starting ${process.execPath} ${nextBin} ${nextArgs.join(" ")}`);
 
 let browserOpened = false;
 const url = `http://${hostname ?? "localhost"}:${port}`;
 
 child.stdout.on("data", (chunk) => {
   const text = chunk.toString();
-  process.stdout.write(text);
+  writeServiceLog(text.trimEnd());
+  process.stdout?.write(text);
   if (openBrowser && !browserOpened && text.includes("Ready")) {
     browserOpened = true;
     const isWindows = process.platform === "win32";
@@ -71,4 +85,17 @@ child.stdout.on("data", (chunk) => {
   }
 });
 
-child.on("exit", (code) => process.exit(code ?? 0));
+child.stderr.on("data", (chunk) => {
+  const text = chunk.toString();
+  writeServiceLog(`[stderr] ${text.trimEnd()}`);
+  process.stderr?.write(text);
+});
+
+child.on("error", (error) => {
+  writeServiceLog(`Failed to start Next.js: ${error.stack ?? error.message}`);
+});
+
+child.on("exit", (code, signal) => {
+  writeServiceLog(`Next.js exited with code ${code ?? "null"}, signal ${signal ?? "none"}`);
+  process.exit(code ?? 0);
+});
