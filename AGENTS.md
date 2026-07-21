@@ -64,6 +64,7 @@ app/api/
   skills/install/route.ts         POST install skills through npx skills add
   skills/search/route.ts          GET/POST skills.sh search
   worktrees/route.ts              GET/POST/DELETE git worktrees
+  voice/transcribe/route.ts       POST raw Float32 PCM (X-Sample-Rate header) → { text }
 
 lib/
   agent-client.ts      typed fetch helper for /api/agent commands
@@ -72,11 +73,13 @@ lib/
   file-paths.ts        client/server path encoding helpers
   markdown.ts          shared markdown helpers
   npx.ts               npx runner used by skill install
+  provider-quotas.ts   厂商额度查询注册表（DeepSeek/MiniMax/Kimi，配置走 QUOTA_* env）
   pi-types.ts          local structural types for pi SDK objects
   rpc-manager.ts      AgentSessionWrapper + registry + startRpcSession
   session-reader.ts   SessionManager wrappers + path cache + buildSessionContext adapter
   tool-presets.ts     PRESET_NONE/DEFAULT/FULL + getPresetFromTools()
   types.ts            shared TypeScript types
+  voice.ts            SenseVoice 识别器单例（globalThis 抗热重载）+ transcribePcm
   normalize.ts        normalizeToolCalls() — field name mismatch between file format and our types
   worktree.ts         project/worktree resolution and git worktree operations
 
@@ -103,7 +106,13 @@ hooks/
   useDragDrop.ts      shared drag/drop state
   useIsMobile.ts      responsive breakpoint hook
   useTheme.ts         theme state
+  useVoiceInput.ts    麦克风 PCM 采集 + /api/voice/transcribe 上传转写
 ```
+
+语音输入：ChatInput 工具栏麦克风按钮 → `useVoiceInput` 录音 → `/api/voice/transcribe`
+（sherpa-onnx-node + `models/sensevoice-small-int8`，可用 `PIX_VOICE_MODEL_DIR` 覆盖）
+→ `insertText` 插入光标处。启动器侧另有独立的系统级语音输入
+（`launcher/VoiceInputService.cs`，悬浮球/托盘菜单开关，全局右 Ctrl 按住说话）。
 
 ---
 

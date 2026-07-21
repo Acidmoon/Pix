@@ -11,6 +11,9 @@ internal sealed class LauncherForm : Form
 
     private readonly PiWebProcessManager service = new();
     private readonly BrowserApp browser = new();
+    private readonly VoiceInputService voiceInput = new();
+    private readonly ToolStripMenuItem voiceMenuItem = new();
+    private readonly ToolStripMenuItem trayVoiceItem = new();
     private readonly FloatingIconControl floatingIcon = new();
     private readonly PanelForm panel = new();
     private readonly System.Windows.Forms.Timer refreshTimer = new() { Interval = 1000 };
@@ -95,6 +98,7 @@ internal sealed class LauncherForm : Form
         panel.StopRequested += async () => await StopServiceAsync();
         panel.OpenRequested += () => OpenBrowser();
         panel.CollapseRequested += () => Collapse();
+        panel.VoiceToggleRequested += () => ToggleVoiceInput();
     }
 
     private void BuildTrayIcon()
@@ -105,11 +109,14 @@ internal sealed class LauncherForm : Form
         trayMenu.Items.Add(trayOpenItem);
         trayMenu.Items.Add(trayStopItem);
         trayMenu.Items.Add(new ToolStripSeparator());
+        trayMenu.Items.Add(trayVoiceItem);
+        trayMenu.Items.Add(new ToolStripSeparator());
         trayMenu.Items.Add("退出", null, async (_, _) => await ExitAsync());
 
         trayStartItem.Click += async (_, _) => { ShowControlPanel(); await StartServiceAsync(); };
         trayOpenItem.Click += (_, _) => OpenBrowser();
         trayStopItem.Click += async (_, _) => await StopServiceAsync();
+        trayVoiceItem.Click += (_, _) => ToggleVoiceInput();
 
         trayIcon.Icon = Icon;
         trayIcon.Text = "Pix Launcher";
@@ -118,7 +125,13 @@ internal sealed class LauncherForm : Form
         trayIcon.DoubleClick += (_, _) => ShowControlPanel();
 
         contextMenu.Items.Add("展开", null, (_, _) => ShowControlPanel());
+        contextMenu.Items.Add(voiceMenuItem);
         contextMenu.Items.Add("退出", null, async (_, _) => await ExitAsync());
+        voiceMenuItem.Click += (_, _) => ToggleVoiceInput();
+
+        voiceInput.StatusChanged += OnVoiceStatusChanged;
+        voiceInput.ErrorOccurred += OnVoiceError;
+        RenderVoiceStatus(VoiceInputService.Status.Off);
     }
 
     private void WireEvents()
@@ -363,6 +376,61 @@ internal sealed class LauncherForm : Form
         trayIcon.Text = service.IsRunning ? "Pix Launcher - 运行中" : "Pix Launcher - 未启动";
     }
 
+    // ---- 语音输入开关 ----
+
+    private void ToggleVoiceInput()
+    {
+        try
+        {
+            if (voiceInput.IsRunning) voiceInput.Stop();
+            else voiceInput.Start();
+        }
+        catch (Exception error)
+        {
+            MessageBox.Show(this, error.Message, "语音输入", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    private void OnVoiceStatusChanged(VoiceInputService.Status status)
+    {
+        if (closing || IsDisposed) return;
+        try { BeginInvoke(() => RenderVoiceStatus(status)); }
+        catch (InvalidOperationException) { /* 窗口句柄正在销毁 */ }
+    }
+
+    private void OnVoiceError(string message)
+    {
+        if (closing || IsDisposed) return;
+        try
+        {
+            BeginInvoke(() =>
+                MessageBox.Show(this, message, "语音输入", MessageBoxButtons.OK, MessageBoxIcon.Warning));
+        }
+        catch (InvalidOperationException) { /* 窗口句柄正在销毁 */ }
+    }
+
+    private void RenderVoiceStatus(VoiceInputService.Status status)
+    {
+        var text = status switch
+        {
+            VoiceInputService.Status.Ready => "语音输入：开（按住右 Ctrl 说话）",
+            VoiceInputService.Status.Recording => "语音输入：录音中…",
+            VoiceInputService.Status.Recognizing => "语音输入：识别中…",
+            _ => "语音输入：关",
+        };
+        voiceMenuItem.Text = text;
+        trayVoiceItem.Text = text;
+        // 面板语音区块：短状态文案 + 开关态
+        var (panelText, active) = status switch
+        {
+            VoiceInputService.Status.Ready => ("已开启", true),
+            VoiceInputService.Status.Recording => ("录音中…", true),
+            VoiceInputService.Status.Recognizing => ("识别中…", true),
+            _ => ("已关闭", false),
+        };
+        panel.SetVoiceStatus(panelText, active);
+    }
+
     internal static Icon LoadAppIcon()
     {
         var assembly = System.Reflection.Assembly.GetExecutingAssembly();
@@ -409,6 +477,7 @@ internal sealed class LauncherForm : Form
         Enabled = false;
         if (!attachedToBrowser) LauncherPlacement.Save(Location);
         browser.Stop();
+        voiceInput.Dispose();
         await service.StopAsync();
         browser.Dispose();
         service.Dispose();
@@ -434,6 +503,7 @@ internal sealed class LauncherForm : Form
             fadeAnimator.Dispose();
             followTicker.Dispose();
             refreshTimer.Dispose();
+            voiceInput.Dispose();
             panel.Dispose();
         }
         base.Dispose(disposing);

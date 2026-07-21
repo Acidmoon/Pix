@@ -2,7 +2,13 @@ using System.Drawing.Drawing2D;
 
 namespace Pix.Launcher;
 
-/// <summary>The satellite control panel drawn beside the floating icon on demand.</summary>
+/// <summary>
+/// 悬浮球展开的控制面板。
+/// 布局按"状态 → 操作 → 工具 → 信息"的人体工学动线组织：
+/// 头部一眼看到服务状态；服务区块永远只有一个最显眼的主操作；
+/// 语音输入是独立的常驻区块，用开关（toggle）表达二元状态；
+/// 余额与额度是只读信息，沉底。
+/// </summary>
 internal sealed class PanelForm : Form
 {
     public static readonly Size PanelSize = new(380, 560);
@@ -45,6 +51,10 @@ internal sealed class PanelForm : Form
     private readonly SmoothButton openButton = new();
     private readonly SmoothButton stopButton = new();
 
+    // 语音区块
+    private readonly VoiceToggle voiceToggle = new();
+    private readonly Label voiceStatusLabel = new();
+
     private readonly ValueAnimator showAnimator = new()
     {
         Duration = TimeSpan.FromMilliseconds(140),
@@ -66,6 +76,7 @@ internal sealed class PanelForm : Form
     public event Action? OpenRequested;
     public event Func<Task>? StopRequested;
     public event Action? CollapseRequested;
+    public event Action? VoiceToggleRequested;
 
     public PanelForm()
     {
@@ -97,6 +108,7 @@ internal sealed class PanelForm : Form
         startButton.Click += async (_, _) => { if (StartRequested is not null) await StartRequested(); };
         openButton.Click += (_, _) => OpenRequested?.Invoke();
         stopButton.Click += async (_, _) => { if (StopRequested is not null) await StopRequested(); };
+        voiceToggle.Click += (_, _) => VoiceToggleRequested?.Invoke();
         KeyDown += (_, eventArgs) => { if (eventArgs.KeyCode == Keys.Escape) CollapseRequested?.Invoke(); };
     }
 
@@ -161,6 +173,14 @@ internal sealed class PanelForm : Form
         ApplyEnabledStates();
     }
 
+    /// <summary>更新语音区块：text 为状态文案（已关闭/已开启/录音中…），active 驱动开关与强调色。</summary>
+    public void SetVoiceStatus(string text, bool active)
+    {
+        voiceToggle.SetChecked(active);
+        voiceStatusLabel.Text = text;
+        voiceStatusLabel.ForeColor = active ? Accent : TextFaint;
+    }
+
     public void RenderAccounts(LauncherStatusSnapshot? snapshot)
     {
         if (snapshot is null)
@@ -184,9 +204,11 @@ internal sealed class PanelForm : Form
             {
                 reused.Remove(provider.Id);
             }
+
             control.SetSnapshot(provider);
             ordered.Add(control);
         }
+
         foreach (var leftover in reused.Values) leftover.Dispose();
         accountsList.Controls.Clear();
         accountsList.Controls.AddRange(ordered.ToArray());
@@ -214,6 +236,15 @@ internal sealed class PanelForm : Form
     }
 
     private void BuildLayout()
+    {
+        BuildHeader();
+        BuildServiceSection();
+        BuildVoiceSection();
+        BuildAccountsSection();
+    }
+
+    /// <summary>头部：标题 + 一眼可读的服务状态 + 收起。</summary>
+    private void BuildHeader()
     {
         var titleLabel = new Label
         {
@@ -247,15 +278,14 @@ internal sealed class PanelForm : Form
             Size = new Size(340, 1),
         };
 
-        BuildStoppedPanel();
-        BuildRunningPanel();
-        Controls.AddRange([statusDot, titleLabel, statusLabel, collapseButton, headerLine, stoppedPanel, runningPanel]);
+        Controls.AddRange([statusDot, titleLabel, statusLabel, collapseButton, headerLine]);
     }
 
-    private void BuildStoppedPanel()
+    /// <summary>服务区块：当前状态永远只提供一个最显眼的主操作。</summary>
+    private void BuildServiceSection()
     {
-        stoppedPanel.Location = new Point(20, 84);
-        stoppedPanel.Size = new Size(340, 456);
+        stoppedPanel.Location = new Point(20, 74);
+        stoppedPanel.Size = new Size(340, 150);
         stoppedPanel.BackColor = PanelBg;
 
         var stoppedTitle = new Label
@@ -264,7 +294,7 @@ internal sealed class PanelForm : Form
             Font = StoppedTitleFont,
             ForeColor = TextPrimary,
             AutoSize = true,
-            Location = new Point(0, 18),
+            Location = new Point(0, 4),
         };
         var description = new Label
         {
@@ -272,10 +302,10 @@ internal sealed class PanelForm : Form
             Font = DescFont,
             ForeColor = TextSecondary,
             AutoSize = true,
-            Location = new Point(0, 50),
+            Location = new Point(0, 38),
         };
-        ConfigureAccentButton(startButton, "启动 Pi Web", new Size(340, 44));
-        startButton.Location = new Point(0, 88);
+        ConfigureAccentButton(startButton, "启动 Pi Web", new Size(340, 42));
+        startButton.Location = new Point(0, 70);
 
         var hint = new Label
         {
@@ -283,36 +313,80 @@ internal sealed class PanelForm : Form
             Font = HintFont,
             ForeColor = TextFaint,
             AutoSize = true,
-            Location = new Point(0, 146),
+            Location = new Point(0, 124),
         };
         stoppedPanel.Controls.AddRange([stoppedTitle, description, startButton, hint]);
-    }
 
-    private void BuildRunningPanel()
-    {
-        runningPanel.Location = new Point(20, 80);
-        runningPanel.Size = new Size(340, 460);
+        runningPanel.Location = new Point(20, 74);
+        runningPanel.Size = new Size(340, 150);
         runningPanel.BackColor = PanelBg;
 
-        serviceMetaLabel.AutoSize = true;
-        serviceMetaLabel.Location = new Point(0, 4);
-        serviceMetaLabel.ForeColor = TextSecondary;
-        serviceMetaLabel.Font = MetaFont;
         agentLabel.AutoSize = true;
-        agentLabel.Location = new Point(0, 26);
+        agentLabel.Location = new Point(0, 4);
         agentLabel.ForeColor = TextPrimary;
         agentLabel.Font = BodyBoldFont;
+        serviceMetaLabel.AutoSize = true;
+        serviceMetaLabel.Location = new Point(0, 28);
+        serviceMetaLabel.ForeColor = TextFaint;
+        serviceMetaLabel.Font = MetaFont;
 
-        ConfigureAccentButton(openButton, "打开界面", new Size(232, 38));
-        openButton.Location = new Point(0, 56);
-        ConfigureGhostButton(stopButton, "停止", new Size(98, 38));
-        stopButton.Location = new Point(242, 56);
+        ConfigureAccentButton(openButton, "打开界面", new Size(234, 40));
+        openButton.Location = new Point(0, 58);
+        ConfigureGhostButton(stopButton, "停止", new Size(94, 40));
+        stopButton.Location = new Point(246, 58);
         stopButton.SetPalette(PanelBg, GhostHover, GhostPress, Danger, Danger, PanelBg, TextFaint);
 
+        runningPanel.Controls.AddRange([agentLabel, serviceMetaLabel, openButton, stopButton]);
+
+        Controls.AddRange([stoppedPanel, runningPanel]);
+    }
+
+    /// <summary>语音输入区块：常驻，开关 + 状态文案 + 使用提示。</summary>
+    private void BuildVoiceSection()
+    {
+        var voicePanel = new Panel
+        {
+            Location = new Point(20, 236),
+            Size = new Size(340, 84),
+            BackColor = PanelBg,
+        };
+
+        var voiceTitle = new Label
+        {
+            Text = "语音输入",
+            Font = SectionFont,
+            ForeColor = TextPrimary,
+            AutoSize = true,
+            Location = new Point(0, 2),
+        };
+        voiceToggle.Location = new Point(292, 0);
+
+        voiceStatusLabel.AutoSize = true;
+        voiceStatusLabel.Font = DescFont;
+        voiceStatusLabel.ForeColor = TextFaint;
+        voiceStatusLabel.Location = new Point(0, 32);
+        voiceStatusLabel.Text = "已关闭";
+
+        var voiceHint = new Label
+        {
+            Text = "开启后，在任意应用按住右 Ctrl 说话，松开自动上屏",
+            Font = HintFont,
+            ForeColor = TextFaint,
+            AutoSize = true,
+            Location = new Point(0, 56),
+        };
+
+        voicePanel.Controls.AddRange([voiceTitle, voiceToggle, voiceStatusLabel, voiceHint]);
+        Controls.Add(voicePanel);
+    }
+
+    /// <summary>余额与额度：只读信息，沉底。</summary>
+    private void BuildAccountsSection()
+    {
         var separator = new Panel
         {
             BackColor = Border,
-            Location = new Point(0, 114),
+            Location = new Point(20, 330),
             Size = new Size(340, 1),
         };
         var accountsTitle = new Label
@@ -321,31 +395,22 @@ internal sealed class PanelForm : Form
             Font = SectionFont,
             ForeColor = TextPrimary,
             AutoSize = true,
-            Location = new Point(0, 130),
+            Location = new Point(20, 344),
         };
         accountsUpdatedLabel.AutoSize = true;
         accountsUpdatedLabel.ForeColor = TextFaint;
         accountsUpdatedLabel.Font = SyncFont;
-        accountsUpdatedLabel.Location = new Point(0, 156);
+        accountsUpdatedLabel.Location = new Point(20, 368);
 
-        accountsList.Location = new Point(0, 178);
-        accountsList.Size = new Size(340, 282);
+        accountsList.Location = new Point(20, 390);
+        accountsList.Size = new Size(340, 158);
         accountsList.AutoScroll = true;
         accountsList.FlowDirection = FlowDirection.TopDown;
         accountsList.WrapContents = false;
         accountsList.Padding = Padding.Empty;
         accountsList.BackColor = PanelBg;
 
-        runningPanel.Controls.AddRange([
-            serviceMetaLabel,
-            agentLabel,
-            openButton,
-            stopButton,
-            separator,
-            accountsTitle,
-            accountsUpdatedLabel,
-            accountsList,
-        ]);
+        Controls.AddRange([separator, accountsTitle, accountsUpdatedLabel, accountsList]);
     }
 
     private void ApplyShape()
@@ -420,5 +485,44 @@ internal sealed class PanelForm : Form
         path.AddArc(rectangle.Left, rectangle.Bottom - diameter, diameter, diameter, 90, 90);
         path.CloseFigure();
         return path;
+    }
+
+    /// <summary>
+    /// 语音开关（toggle）：二元状态最直觉的控件，比按钮文案变化更明确。
+    /// 状态由外部 SetVoiceStatus 驱动，点击只负责转发事件。
+    /// </summary>
+    private sealed class VoiceToggle : Control
+    {
+        private bool isChecked;
+
+        public VoiceToggle()
+        {
+            Size = new Size(46, 24);
+            DoubleBuffered = true;
+            Cursor = Cursors.Hand;
+        }
+
+        public void SetChecked(bool value)
+        {
+            if (isChecked == value) return;
+            isChecked = value;
+            Invalidate();
+        }
+
+        protected override void OnPaint(PaintEventArgs eventArgs)
+        {
+            var graphics = eventArgs.Graphics;
+            graphics.SmoothingMode = SmoothingMode.AntiAlias;
+
+            var track = new Rectangle(1, 1, Width - 3, Height - 3);
+            using var trackPath = RoundedRectangle(track, track.Height / 2);
+            using var trackBrush = new SolidBrush(isChecked ? Accent : Color.FromArgb(56, 61, 69));
+            graphics.FillPath(trackBrush, trackPath);
+
+            var knobSize = Height - 8;
+            var knobX = isChecked ? Width - knobSize - 4 : 4;
+            using var knobBrush = new SolidBrush(Color.FromArgb(242, 244, 247));
+            graphics.FillEllipse(knobBrush, knobX, 4, knobSize, knobSize);
+        }
     }
 }

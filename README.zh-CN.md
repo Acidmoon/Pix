@@ -19,8 +19,25 @@ Pix 是 [pi 编程智能体](https://github.com/badlogic/pi-mono) 的 Windows �
 - **余额与额度面板**：一眼看清账户余量——
   - DeepSeek：分币种显示总额 / 充值 / 赠送余额
   - MiniMax 编程套餐（国内与国际站）：5 小时窗口与 7 天窗口的剩余百分比和重置时间
+  - Kimi：Code 5 小时 / 7 天额度剩余百分比，详情行附订阅与赠送额度
 - **服务状态**：PID、端口、活跃 AgentSession 数；系统托盘菜单镜像全部控制项。
 - **细节体验**：150–240ms 的克制动画、隐藏式滚动条、固定的专用浏览器 profile（扩展和登录态持久保留，不再每次启动重复弹首次运行窗口）、与悬浮球统一的应用图标。
+
+## 语音输入
+
+Pix 内置端侧语音转文字（[SenseVoice](https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17)，经 sherpa-onnx 本地运行——不上云、不需要 API key），中 / 英 / 日 / 韩 / 粤自动识别语种。
+
+- **网页界面内**：点聊天输入框的麦克风按钮开始说话，再点一次停止，识别文本插入光标处。
+- **系统级全局**：在启动器面板（或托盘菜单）打开"语音输入"，然后在任意应用里按住 **右 Ctrl** 说话、松开，文字自动输入光标处；右 Alt 是第二绑定键。长文本自动改用剪贴板粘贴。
+
+### 模型下载（一次性）
+
+模型约 240MB，不随仓库分发（已 gitignore）。下载 SenseVoice int8 版本，把下面两个文件放进应用旁的 `models/sensevoice-small-int8/` 目录：
+
+- `model.int8.onnx`
+- `tokens.txt`
+
+下载地址：[Hugging Face](https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17) · [ModelScope 镜像](https://www.modelscope.cn/models/danieldong/sensevoice-small-onnx-quant)。想放在别的位置，用环境变量 `PIX_VOICE_MODEL_DIR` 指向模型目录即可。模型缺失时麦克风按钮会变琥珀色，点击它会看到这段说明。
 
 ## 运行环境
 

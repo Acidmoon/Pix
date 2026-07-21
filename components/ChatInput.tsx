@@ -9,6 +9,7 @@ import {
 } from "@/lib/file-fuzzy";
 import { FolderIcon, getFileIcon } from "./FileIcons";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useVoiceInput } from "@/hooks/useVoiceInput";
 
 export interface AttachedImage {
   data: string;   // base64, no prefix
@@ -238,6 +239,53 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   valueRef.current = value;
   attachedImagesRef.current = attachedImages;
 
+  // 光标处插入文本（语音输入、拖放文本等共用）
+  const insertTextAtCursor = useCallback((text: string) => {
+    const ta = textareaRef.current;
+    if (!ta) {
+      setValue((v) => v + (v ? " " : "") + text);
+      return;
+    }
+    const start = ta.selectionStart ?? ta.value.length;
+    const end = ta.selectionEnd ?? ta.value.length;
+    const before = ta.value.slice(0, start);
+    const after = ta.value.slice(end);
+    const sep = before.length > 0 && !before.endsWith(" ") ? " " : "";
+    const newVal = before + sep + text + after;
+    setValue(newVal);
+    setAtQuery(null);
+    requestAnimationFrame(() => {
+      if (!ta) return;
+      const pos = start + sep.length + text.length;
+      ta.setSelectionRange(pos, pos);
+      ta.focus();
+      ta.style.height = "auto";
+      ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+    });
+  }, []);
+
+  // 语音输入：录音 → 转写 → 插入光标处
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  // 模型就绪状态：未下载时在按钮上引导（false=缺失，null=查询中）
+  const [voiceModelReady, setVoiceModelReady] = useState<boolean | null>(null);
+  const voiceModelDirRef = useRef("");
+  useEffect(() => {
+    fetch("/api/voice/status")
+      .then((r) => r.json())
+      .then((d: { ready?: boolean; modelDir?: string }) => {
+        setVoiceModelReady(d.ready === true);
+        voiceModelDirRef.current = d.modelDir ?? "";
+      })
+      .catch(() => { /* 查询失败按就绪处理，录音时自然报错 */ });
+  }, []);
+  const voice = useVoiceInput({
+    onText: insertTextAtCursor,
+    onError: (msg) => {
+      setVoiceError(msg);
+      setTimeout(() => setVoiceError(null), 4000);
+    },
+  });
+
   useImperativeHandle(ref, () => ({
     insertIfEmpty(text: string) {
       const ta = textareaRef.current;
@@ -269,29 +317,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
       });
     },
-    insertText(text: string) {
-      const ta = textareaRef.current;
-      if (!ta) {
-        setValue((v) => v + (v ? " " : "") + text);
-        return;
-      }
-      const start = ta.selectionStart ?? ta.value.length;
-      const end = ta.selectionEnd ?? ta.value.length;
-      const before = ta.value.slice(0, start);
-      const after = ta.value.slice(end);
-      const sep = before.length > 0 && !before.endsWith(" ") ? " " : "";
-      const newVal = before + sep + text + after;
-      setValue(newVal);
-      setAtQuery(null);
-      requestAnimationFrame(() => {
-        if (!ta) return;
-        const pos = start + sep.length + text.length;
-        ta.setSelectionRange(pos, pos);
-        ta.focus();
-        ta.style.height = "auto";
-        ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
-      });
-    },
+    insertText: insertTextAtCursor,
     addImages(files: File[]) {
       processImageFiles(files);
     },
@@ -1429,6 +1455,82 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 <circle cx="8.5" cy="8.5" r="1.5" />
                 <polyline points="21 15 16 10 5 21" />
               </svg>
+            </button>
+            {/* Voice input: click to start/stop recording, text inserted at cursor */}
+            <button
+              onClick={() => {
+                if (voiceModelReady === false) {
+                  window.alert(
+                    "Voice model is not installed.\n\n"
+                    + "Download sherpa-onnx SenseVoice (int8):\n"
+                    + "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17\n\n"
+                    + "Put model.int8.onnx and tokens.txt into:\n"
+                    + voiceModelDirRef.current + "\n\n"
+                    + "(or point PIX_VOICE_MODEL_DIR at your model folder)",
+                  );
+                  return;
+                }
+                voice.toggle();
+              }}
+              disabled={isStreaming || voice.state === "transcribing" || voice.state === "requesting"}
+              title={
+                voiceModelReady === false
+                  ? "Voice model not installed — click for setup"
+                  : voiceError
+                    ?? (voice.state === "recording"
+                      ? `Recording ${voice.seconds}s — click to stop`
+                      : voice.state === "requesting"
+                        ? "Requesting microphone…"
+                        : voice.state === "transcribing"
+                          ? "Transcribing…"
+                          : "Voice input")
+              }
+              style={{
+                flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                gap: 4,
+                minWidth: 32, height: 32, padding: voice.state === "recording" ? "0 8px" : 0,
+                background: voice.state === "recording" ? "var(--bg-hover)" : "none",
+                border: "none",
+                borderRadius: 9,
+                color: voiceError ? "#e5484d"
+                  : voice.state === "recording" ? "#e5484d"
+                  : voiceModelReady === false ? "#e5a54b"
+                  : "var(--text-muted)",
+                cursor: isStreaming || voice.state !== "idle" && voice.state !== "recording" ? "not-allowed" : "pointer",
+                opacity: isStreaming || voice.state === "requesting" ? 0.5 : 1,
+                transition: "background 0.12s, color 0.12s",
+                fontSize: 11,
+                fontVariantNumeric: "tabular-nums",
+              }}
+              onMouseEnter={(e) => {
+                if (isStreaming || voice.state !== "idle") return;
+                e.currentTarget.style.background = "var(--bg-hover)";
+                e.currentTarget.style.color = "var(--text)";
+              }}
+              onMouseLeave={(e) => {
+                if (isStreaming || voice.state !== "idle") return;
+                e.currentTarget.style.background = "none";
+                e.currentTarget.style.color = voiceError ? "#e5484d"
+                  : voiceModelReady === false ? "#e5a54b"
+                  : "var(--text-muted)";
+              }}
+            >
+              {voice.state === "transcribing" ? (
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ animation: "spin 1s linear infinite" }}>
+                  <path d="M21 12a9 9 0 1 1-6.2-8.56" />
+                </svg>
+              ) : (
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={voice.state === "requesting" ? { animation: "pulse 1.2s ease-in-out infinite" } : undefined}>
+                  <rect x="9" y="2" width="6" height="12" rx="3" />
+                  <path d="M5 10v1a7 7 0 0 0 14 0v-1" />
+                  <line x1="12" y1="18" x2="12" y2="22" />
+                </svg>
+              )}
+              {voice.state === "recording" && (
+                <span style={{ animation: "pulse 1.2s ease-in-out infinite" }}>
+                  {Math.floor(voice.seconds / 60)}:{String(voice.seconds % 60).padStart(2, "0")}
+                </span>
+              )}
             </button>
             {/* Model selector — visible always, disabled during streaming */}
             {modelOptions.length > 0 && currentName && onModelChange && (

@@ -19,8 +19,25 @@ The launcher is what makes Pix different from plain pi-web. It is a small WinFor
 - **Balance & quota panel**: see at a glance what your configured providers have left —
   - DeepSeek: total / topped-up / granted balance per currency
   - MiniMax Coding Plan (CN & global): remaining 5-hour window and 7-day window with reset times
+  - Kimi: remaining 5-hour / 7-day Code quota, plus subscription & gift balance in the detail line
 - **Service insight**: PID, port, and live AgentSession count; a system tray menu mirrors the controls.
 - **Quiet by design**: smooth 150–240ms animations, hidden scrollbars, a persistent dedicated browser profile (extensions and logins survive restarts instead of re-onboarding every launch), and an application icon that matches the orb.
+
+## Voice input
+
+Pix ships on-device speech-to-text ([SenseVoice](https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17) via sherpa-onnx — fully local, no cloud, no API key). Chinese, English, Japanese, Korean and Cantonese are auto-detected.
+
+- **In the web UI**: click the mic button in the chat input bar, speak, click again to stop — the transcript is inserted at the cursor.
+- **System-wide**: toggle "语音输入" in the launcher panel (or the tray menu), then hold **Right Ctrl** in any app, speak, and release — the text is typed at the cursor. Right Alt is a second binding. Long transcripts fall back to clipboard paste.
+
+### Model setup (one-time)
+
+The model (~240 MB) is not bundled and is git-ignored. Download the int8 build of SenseVoice and place these two files under `models/sensevoice-small-int8/` next to the app:
+
+- `model.int8.onnx`
+- `tokens.txt`
+
+Sources: [Hugging Face](https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17) · [ModelScope mirror](https://www.modelscope.cn/models/danieldong/sensevoice-small-onnx-quant). To keep the model elsewhere, point the `PIX_VOICE_MODEL_DIR` environment variable at its folder. If the model is missing, the mic button turns amber — click it to see these instructions.
 
 ## Requirements
 

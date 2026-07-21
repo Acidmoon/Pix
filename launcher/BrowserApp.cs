@@ -69,9 +69,13 @@ internal sealed class BrowserApp : IDisposable
         Directory.CreateDirectory(profileDirectory);
 
         job = new WindowsJobObject();
+        // --use-fake-ui-for-media-stream：--app 模式没有地址栏，麦克风权限
+        // 弹窗无处显示，getUserMedia 会一直挂起；该标志让专用隔离配置
+        // 自动放行媒体权限（语音输入按钮依赖），只影响 Pix 专用 profile。
+        // --test-type：抑制 Chromium 对非受支持命令行标志的警告横幅。
         process = job.StartProcess(
             browser,
-            $"--app=\"{url}\" --user-data-dir=\"{profileDirectory}\" --no-first-run --no-default-browser-check --hide-crash-restore-bubble",
+            $"--app=\"{url}\" --user-data-dir=\"{profileDirectory}\" --no-first-run --no-default-browser-check --hide-crash-restore-bubble --use-fake-ui-for-media-stream --test-type",
             Path.GetDirectoryName(browser)!);
     }
 
