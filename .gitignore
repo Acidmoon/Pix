@@ -49,3 +49,11 @@ launcher/obj/
 /PixApp/
 /logs/
 /.build-home/
+
+# voice model files (large binaries)
+/models/
+
+# local env overrides (only .env.example is committed)
+.env
+.env.local
+.env.*.local

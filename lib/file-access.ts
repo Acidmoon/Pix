@@ -1,5 +1,4 @@
 import { readdirSync } from "fs";
-import { homedir } from "os";
 import path from "path";
 import { getAdditionalAllowedRoots, normalizeSlashes } from "./allowed-roots";
 import { listAllSessions } from "./session-reader";
@@ -36,9 +35,16 @@ export async function getAllowedFileRoots(): Promise<Set<string>> {
 
   // Also allow ~/pi-cwd-* directories created by the default-cwd endpoint.
   try {
-    for (const name of readdirSync(homedir())) {
-      if (/^pi-cwd-\d{8}$/.test(name)) {
-        roots.add(normalizeSlashes(path.join(homedir(), name)));
+    // 必须让 home 路径在构建期完全不可静态求值（只从 process.env 取，
+    // 不能兜底 homedir()——@vercel/nft 会求值它能分析的兜底分支，
+    // 把整个用户目录当资源目录 glob 扫描，Windows 上系统 junction
+    // （My Documents 等）会 EPERM 导致构建失败）。
+    const homeDir = process.env.USERPROFILE ?? process.env.HOME;
+    if (homeDir) {
+      for (const name of readdirSync(homeDir)) {
+        if (/^pi-cwd-\d{8}$/.test(name)) {
+          roots.add(normalizeSlashes(path.join(homeDir, name)));
+        }
       }
     }
   } catch {
