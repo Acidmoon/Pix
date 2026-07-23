@@ -10,6 +10,7 @@ import { TabBar, type Tab } from "./TabBar";
 import { ModelsConfig } from "./ModelsConfig";
 import { SkillsConfig } from "./SkillsConfig";
 import { PluginsConfig } from "./PluginsConfig";
+import { UpdateConfig } from "./UpdateConfig";
 import { BranchNavigator } from "./BranchNavigator";
 import { useTheme } from "@/hooks/useTheme";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -37,6 +38,8 @@ export function AppShell() {
   const [modelsRefreshKey, setModelsRefreshKey] = useState(0);
   const [skillsConfigOpen, setSkillsConfigOpen] = useState(false);
   const [pluginsConfigOpen, setPluginsConfigOpen] = useState(false);
+  const [updateConfigOpen, setUpdateConfigOpen] = useState(false);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileSidebarReady, setMobileSidebarReady] = useState(false);
   // On mobile the sidebar is an overlay drawer; hide it by default so the chat
@@ -46,6 +49,24 @@ export function AppShell() {
   }, [isMobile]);
   useEffect(() => {
     setMobileSidebarReady(true);
+  }, []);
+  // 定期检查更新，驱动侧边栏「更新」按钮红点（挂载时 + 每 30 分钟）。
+  useEffect(() => {
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const res = await fetch("/api/update/status", { cache: "no-store" });
+        if (!res.ok) return;
+        const status = await res.json() as { app?: { updateAvailable?: boolean }; kernel?: Array<{ updateAvailable?: boolean }> };
+        if (cancelled) return;
+        setUpdateAvailable(!!(status.app?.updateAvailable || status.kernel?.some((k) => k.updateAvailable)));
+      } catch {
+        // 离线等检查失败时保持现状
+      }
+    };
+    void check();
+    const timer = setInterval(() => void check(), 30 * 60 * 1000);
+    return () => { cancelled = true; clearInterval(timer); };
   }, []);
   const chatInputRef = useRef<ChatInputHandle | null>(null);
   const topBarRef = useRef<HTMLDivElement>(null);
@@ -393,7 +414,19 @@ export function AppShell() {
               </svg>
             ),
           },
-        ] as { label: string; onClick: () => void; disabled: boolean; icon: React.ReactNode }[]).map(({ label, onClick, disabled, icon }) => (
+          {
+            label: "Update",
+            onClick: () => setUpdateConfigOpen(true),
+            disabled: false,
+            badge: updateAvailable,
+            icon: (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
+                <path d="M21 3v5h-5" />
+              </svg>
+            ),
+          },
+        ] as { label: string; onClick: () => void; disabled: boolean; badge?: boolean; icon: React.ReactNode }[]).map(({ label, onClick, disabled, badge, icon }) => (
           <button
             key={label}
             onClick={onClick}
@@ -404,13 +437,16 @@ export function AppShell() {
               height: 32, padding: 0, background: "none", border: "none",
               borderRadius: 9, color: "var(--text-muted)", cursor: disabled ? "default" : "pointer",
               fontSize: 12, opacity: disabled ? 0.35 : 1,
-              transition: "background 0.12s, color 0.12s",
+              transition: "background 0.12s, color 0.12s", position: "relative",
             }}
             onMouseEnter={(e) => { if (!disabled) { e.currentTarget.style.background = "var(--bg-hover)"; e.currentTarget.style.color = "var(--text)"; } }}
             onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--text-muted)"; }}
           >
             {icon}
             {label}
+            {badge && (
+              <span style={{ position: "absolute", top: 4, right: 8, width: 7, height: 7, borderRadius: "50%", background: "#ef4444", pointerEvents: "none" }} />
+            )}
           </button>
         ))}
       </div>
@@ -1090,6 +1126,9 @@ export function AppShell() {
         onClose={() => setPluginsConfigOpen(false)}
         onReloaded={() => setSessionKey((k) => k + 1)}
       />
+    )}
+    {updateConfigOpen && (
+      <UpdateConfig onClose={() => setUpdateConfigOpen(false)} onUpdated={() => setUpdateAvailable(false)} />
     )}
     </>
   );

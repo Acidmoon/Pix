@@ -65,6 +65,8 @@ app/api/
   skills/search/route.ts          GET/POST skills.sh search
   worktrees/route.ts              GET/POST/DELETE git worktrees
   voice/transcribe/route.ts       POST raw Float32 PCM (X-Sample-Rate header) → { text }
+  update/status/route.ts          GET current/latest versions + updateAvailable (npm registry)
+  update/upgrade/route.ts         POST SSE — upgrade kernel/app, then trigger launcher restart
 
 lib/
   agent-client.ts      typed fetch helper for /api/agent commands
@@ -82,6 +84,13 @@ lib/
   voice.ts            SenseVoice 识别器单例（globalThis 抗热重载）+ transcribePcm
   normalize.ts        normalizeToolCalls() — field name mismatch between file format and our types
   worktree.ts         project/worktree resolution and git worktree operations
+  restart.ts          restart marker (logs/pix-restart.json) + requestRestart() for hot update
+  update-check.ts     runtime version read + npm registry latest + semver compare + 10min cache
+  updater.ts          cross-platform npm runner + kernel upgrade + app staging (npm pack)
+
+bin/
+  pi-web.js           node entry that runs `next start` (spawned by the launcher)
+  apply-update.js     whole-app file swap + dep sync, run by the launcher before restart
 
 components/
   AppShell.tsx        layout + URL state + tab management
@@ -99,6 +108,7 @@ components/
   FileIcons.tsx       file icon helpers
   FileViewer.tsx      file content in a tab
   TabBar.tsx          tab bar (Chat + open file tabs)
+  UpdateConfig.tsx    modal for kernel/app upgrade (SSE progress, opened from sidebar bottom)
 
 hooks/
   useAgentSession.ts  messages + streaming + SSE + fork/navigate/reconciliation logic
@@ -184,6 +194,14 @@ Newer pi emits `compaction_start` / `compaction_end`; older versions emitted `au
 
 ### Exported session HTML
 - `/api/sessions/[id]/export` delegates to pi's export helper, then patches recursive tree helpers in the generated HTML to iterative versions so very deep linear sessions do not overflow the browser call stack.
+
+### Hot update & kernel upgrade
+- The pi kernel (`@earendil-works/pi-coding-agent / pi-ai / pi-tui`) is a `serverExternalPackage`, cached by Node's require — upgrading it needs a **process restart**, not an in-place swap. Same for the whole app (`.next`).
+- Restart is launcher-driven: the service writes `logs/pix-restart.json` (`lib/restart.ts requestRestart()`), gracefully stops sessions, then `process.exit(0)`. The launcher's `RefreshStatusAsync` (1s tick) sees the exit, **consumes (deletes) the marker** via `PiWebProcessManager.TryConsumeRestartMarker`, then `RestartAsync()` (new port) + `OpenBrowser()` re-points the Edge/Chrome `--app` window. Marker consumption + the `busy` flag prevent restart loops; a markerless exit (crash) only renders “stopped”, never auto-restarts.
+- `GET /api/update/status` reads versions **at runtime** (app = web-root `package.json`; kernel = `node_modules` `package.json`), not the build-time `NEXT_PUBLIC_PI_VERSION` (stale after a kernel-only upgrade). Latest comes from the npm registry (`PIX_NPM_REGISTRY` overrides the default `registry.npmjs.org`).
+- `POST /api/update/upgrade` streams npm output over SSE. `target:"kernel"` runs `npm install <kernel>@<ver>` in the web root (cross-platform `npm-cli.js` invocation mirroring `lib/npx.ts`, never a shell); on failure it restores the snapshotted `package.json`/lock + reinstalls (rollback) and does NOT restart. `target:"app"` `npm pack`s the new `@agegr/pi-web`, stages it, and the marker carries an `appUpdate` payload.
+- Whole-app swap happens in the launcher while the service is stopped: `PiWebProcessManager.ApplyAppUpdate` runs `bin/apply-update.js <stagedDir>` (swap `bin/.next/public/next.config.ts/package.json`, keep `node_modules`/`logs`/`.env`, then `npm install --omit=dev`). If the new build fails the health check, `RestartForUpdateAsync` restores from the backup dir once (`--no-cleanup`) and retries.
+- Update endpoints are loopback-only like the rest of the browser API (no launcher token); update state lives on `globalThis` to survive hot-reload.
 
 ## Pi Session File Format
 

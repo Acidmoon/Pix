@@ -22,10 +22,40 @@ those remain in the browser UI.
 - Request authenticated AgentSession cleanup before stopping the service.
 - Place the browser and service in Windows Job Objects so their process trees
   are terminated if graceful shutdown times out or the launcher exits.
+- Auto-restart the service after an in-place update: consume the web service's
+  restart marker (`logs/pix-restart.json`), start a fresh process on a new port,
+  and re-point the browser window — no manual restart needed.
 
 The shutdown endpoint exists only when the launcher supplies a random
 `PI_WEB_LAUNCHER_TOKEN`. Regular CLI and development-server runs do not expose
 an unauthenticated service-stop operation.
+
+## Hot update & auto-restart
+
+Pi Web can upgrade its pi kernel (and the whole app) from the browser UI. Because
+the kernel is a Node `serverExternalPackage`, an upgrade only takes effect after
+the Node process restarts — and the launcher owns the process lifecycle and port.
+The flow:
+
+1. The web service runs the upgrade (`npm install` for the kernel, `npm pack` +
+   staging for the whole app), streaming progress to the UI over SSE.
+2. On success it writes `logs/pix-restart.json` (a `RestartMarker`), gracefully
+   stops every AgentSession, then exits.
+3. The launcher's 1s status tick notices the exit, **reads and deletes** the
+   marker (`PiWebProcessManager.TryConsumeRestartMarker`), and calls
+   `RestartAsync()` — a fresh process on a new loopback port — then `OpenBrowser()`
+   re-points the Edge/Chrome `--app` window at the new URL.
+
+Deleting the marker before restarting (plus the launcher's `busy` flag) prevents
+restart loops. An exit **without** a marker is treated as a crash: the launcher
+shows “stopped” and never auto-restarts.
+
+For a whole-app update the marker carries an `appUpdate` payload. Before
+restarting, the launcher runs `node bin/apply-update.js <stagedDir>` to swap the
+new `bin/.next/public/next.config.ts/package.json` into the web root (keeping
+`node_modules`, `logs`, `.env`) and sync dependencies. If the new build fails the
+30s health check, the launcher restores the backup directory once
+(`apply-update.js <backupDir> --no-cleanup`) and retries the restart.
 
 The running panel currently includes two official provider adapters:
 

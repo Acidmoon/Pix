@@ -89,3 +89,29 @@ export interface PluginsResponse {
   totals: PluginResourceCounts;
   diagnostics: PluginDiagnostic[];
 }
+
+// ---- 更新 / 升级 ----
+
+export interface PackageUpdateInfo {
+  pkg: string;
+  /** 运行时实际安装版本；读不到为 null */
+  current: string | null;
+  /** npm registry 的 latest；网络失败为 null */
+  latest: string | null;
+  updateAvailable: boolean;
+  error?: string;
+}
+
+export interface UpdateStatus {
+  app: PackageUpdateInfo;
+  kernel: PackageUpdateInfo[];
+  checkedAt: string;
+}
+
+export type UpdateTarget = "kernel" | "app" | "restart-only";
+
+/** 升级 SSE 事件帧 */
+export type UpdateUpgradeEvent =
+  | { type: "log"; line: string }
+  | { type: "done"; target: UpdateTarget; restart: boolean; fromVersion?: string | null; toVersion?: string }
+  | { type: "error"; message: string };

@@ -292,6 +292,62 @@ internal sealed class LauncherForm : Form
         }
     }
 
+    /// <summary>
+    /// 服务为应用更新自行退出后，由启动器拉起新进程并把浏览器重指到新端口。
+    /// 用户无感落到新服务（前端无需知道新端口）。Phase 3 会在这里加入
+    /// 整应用换文件与健康门控回滚。
+    /// </summary>
+    private async Task RestartForUpdateAsync(RestartMarker marker)
+    {
+        if (busy || closing) return;
+        SetBusy(true);
+        panel.RenderBusyStatus("正在应用更新并重启…");
+        floatingIcon.VisualState = FloatingIconControl.ServiceVisualState.Starting;
+        var rollbackAttempted = false;
+        try
+        {
+            // 整应用升级：服务已退出，先把暂存的新版文件换进 web root（含依赖同步）。
+            if (marker.AppUpdate is not null)
+            {
+                service.ApplyAppUpdate(marker.AppUpdate, restore: false);
+            }
+
+            try
+            {
+                await service.RestartAsync();
+            }
+            catch when (marker.AppUpdate is not null && !rollbackAttempted)
+            {
+                // 新版起不来（健康检查超时）→ 从备份恢复后再重启一次。
+                rollbackAttempted = true;
+                panel.RenderBusyStatus("新版启动失败，正在回滚…");
+                service.ApplyAppUpdate(marker.AppUpdate, restore: true);
+                await service.RestartAsync();
+            }
+
+            // 成功后清理整应用备份（内核升级无 AppUpdate，不涉及）。
+            if (marker.AppUpdate is not null)
+            {
+                try { Directory.Delete(marker.AppUpdate.BackupDir, recursive: true); } catch { /* best effort */ }
+            }
+
+            RenderRunning(null);
+            OpenBrowser();
+            AttachToBrowser();
+            nextAccountRefresh = DateTimeOffset.MinValue;
+            await RefreshStatusAsync();
+        }
+        catch (Exception error)
+        {
+            RenderStopped();
+            MessageBox.Show(this, $"更新后重启失败：{error.Message}", "Pix 更新", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
+
     private async Task StopServiceAsync()
     {
         SetBusy(true);
@@ -322,6 +378,14 @@ internal sealed class LauncherForm : Form
         {
             if (!service.IsRunning)
             {
+                // 服务自行退出且写了重启标志（内核/应用升级或手动重启）→ 自动拉起。
+                // 标志在 TryConsumeRestartMarker 内被删除，加上 busy 位，双重防止重启循环；
+                // 无标志的退出（崩溃）只会 RenderStopped，绝不自动重启。
+                if (!busy && !closing && service.TryConsumeRestartMarker(out var marker) && marker is not null)
+                {
+                    _ = RestartForUpdateAsync(marker);
+                    return;
+                }
                 RenderStopped();
                 return;
             }

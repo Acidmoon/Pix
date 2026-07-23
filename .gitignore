@@ -58,3 +58,10 @@ launcher/obj/
 .env
 .env.local
 .env.*.local
+
+# pi agent local data / plans
+/.pi/
+
+# release staging artifacts and packaged archives
+/.tmp-release-pkg/
+/Pix-*.zip
