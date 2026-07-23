@@ -93,7 +93,7 @@ PixLauncher.exe (WinForms, control plane)
    ▼
 node bin/pi-web.js (Next.js service)
    ▼
-Edge/Chrome --app window (dedicated persistent profile)
+Edge/Chrome --app window (user's existing Default profile)
 ```
 
 - The two processes share no code; the launcher only talks HTTP to pi-web.

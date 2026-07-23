@@ -93,7 +93,7 @@ PixLauncher.exe（WinForms，控制平面）
    ▼
 node bin/pi-web.js（Next.js 服务）
    ▼
-Edge/Chrome --app 窗口（独立持久 profile）
+Edge/Chrome --app 窗口（复用用户现有 Default profile）
 ```
 
 - 两个进程不共享任何代码，启动器只通过 HTTP 与 pi-web 通信。

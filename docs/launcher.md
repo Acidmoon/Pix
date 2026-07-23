@@ -16,15 +16,17 @@ those remain in the browser UI.
 - Expand on click into a start view or a running-service control panel.
 - Show the service PID, port, active AgentSession count, provider balances, and
   subscription quota remaining.
-- Open Edge or Chrome in `--app` mode with a dedicated persistent profile, so
-  extensions and settings survive restarts while the browser process stays
-  owned by the launcher.
+- Open Pi Web in an Edge or Chrome `--app` window that uses the browser's
+  existing `Default` profile, retaining extensions, sign-in state, settings,
+  and site permissions without creating a Pix-specific browser profile.
 - Request authenticated AgentSession cleanup before stopping the service.
-- Place the browser and service in Windows Job Objects so their process trees
-  are terminated if graceful shutdown times out or the launcher exits.
+- Place the service in a Windows Job Object so its process tree is terminated
+  if graceful shutdown times out or the launcher exits. The browser remains
+  independent because it belongs to the user's existing profile.
 - Auto-restart the service after an in-place update: consume the web service's
   restart marker (`logs/pix-restart.json`), start a fresh process on a new port,
-  and re-point the browser window — no manual restart needed.
+  and open the replacement URL in an Edge or Chrome `--app` window — no manual
+  restart needed.
 
 The shutdown endpoint exists only when the launcher supplies a random
 `PI_WEB_LAUNCHER_TOKEN`. Regular CLI and development-server runs do not expose
@@ -44,7 +46,7 @@ The flow:
 3. The launcher's 1s status tick notices the exit, **reads and deletes** the
    marker (`PiWebProcessManager.TryConsumeRestartMarker`), and calls
    `RestartAsync()` — a fresh process on a new loopback port — then `OpenBrowser()`
-   re-points the Edge/Chrome `--app` window at the new URL.
+   opens the replacement URL in an Edge or Chrome `--app` window.
 
 Deleting the marker before restarting (plus the launcher's `busy` flag) prevents
 restart loops. An exit **without** a marker is treated as a crash: the launcher

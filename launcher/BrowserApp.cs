@@ -1,48 +1,22 @@
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using Microsoft.Win32;
 
 namespace Pix.Launcher;
 
-/// <summary>Runs Pi Web in a dedicated Chromium app window owned by a Job Object.</summary>
+/// <summary>Opens Pi Web as a standalone app window in the user's browser profile.</summary>
 internal sealed class BrowserApp : IDisposable
 {
-    private WindowsJobObject? job;
-    private Process? process;
-    private string? profileDirectory;
+    private Process? launchProcess;
 
-    public bool IsOpen => process is { HasExited: false };
+    // Chromium forwards a second launch into its existing browser process, so
+    // this handle is not a reliable representation of the app window itself.
+    public bool IsOpen => false;
 
-    /// <summary>Current bounds of the isolated app window, when it exists and is not minimized.</summary>
+    /// <summary>The user-owned browser window is intentionally not tracked.</summary>
     public bool TryGetWindowBounds(out Rectangle bounds)
     {
         bounds = default;
-        if (process is not { HasExited: false }) return false;
-        process.Refresh();
-        var handle = process.MainWindowHandle;
-        if (handle == IntPtr.Zero || IsIconic(handle)) return false;
-        if (!GetWindowRect(handle, out var rect)) return false;
-        var width = rect.Right - rect.Left;
-        var height = rect.Bottom - rect.Top;
-        if (width <= 0 || height <= 0) return false;
-        bounds = new Rectangle(rect.Left, rect.Top, width, height);
-        return true;
-    }
-
-    [DllImport("user32.dll")]
-    private static extern bool GetWindowRect(IntPtr handle, out Rect rect);
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool IsIconic(IntPtr handle);
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct Rect
-    {
-        public int Left;
-        public int Top;
-        public int Right;
-        public int Bottom;
+        return false;
     }
 
     public void Open(Uri url)
@@ -51,47 +25,29 @@ internal sealed class BrowserApp : IDisposable
         var browser = FindBrowser();
         if (browser is null)
         {
-            // A normal browser tab is a compatibility fallback and cannot be
-            // reliably closed by the launcher because of browser isolation.
+            // Use the system URL handler as a compatibility fallback.
             Process.Start(new ProcessStartInfo(url.ToString()) { UseShellExecute = true });
             return;
         }
 
-        // A persistent dedicated profile keeps extensions and settings across
-        // launches, so policy-injected extensions only run their first-run
-        // behavior once instead of on every start. It stays separate from the
-        // user's everyday browser profile, which keeps this process owned by
-        // the launcher's Job Object.
-        profileDirectory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Pix",
-            "BrowserProfile");
-        Directory.CreateDirectory(profileDirectory);
-
-        job = new WindowsJobObject();
-        // --use-fake-ui-for-media-stream：--app 模式没有地址栏，麦克风权限
-        // 弹窗无处显示，getUserMedia 会一直挂起；该标志让专用隔离配置
-        // 自动放行媒体权限（语音输入按钮依赖），只影响 Pix 专用 profile。
-        // --test-type：抑制 Chromium 对非受支持命令行标志的警告横幅。
-        process = job.StartProcess(
+        // Deliberately omit --user-data-dir: Chromium then uses the installed
+        // browser's normal user-data directory. --profile-directory=Default
+        // selects the profile already used by the local Edge installation,
+        // preserving extensions, login state, cookies, and site permissions.
+        launchProcess = Process.Start(new ProcessStartInfo(
             browser,
-            $"--app=\"{url}\" --user-data-dir=\"{profileDirectory}\" --no-first-run --no-default-browser-check --hide-crash-restore-bubble --use-fake-ui-for-media-stream --test-type",
-            Path.GetDirectoryName(browser)!);
+            $"--app=\"{url}\" --profile-directory=Default --no-first-run --no-default-browser-check --hide-crash-restore-bubble --test-type")
+        {
+            UseShellExecute = false,
+        });
     }
 
     public void Stop()
     {
-        if (process is { HasExited: false })
-        {
-            process.CloseMainWindow();
-            if (!process.WaitForExit(800)) job?.Terminate();
-        }
-
-        process?.Dispose();
-        process = null;
-        job?.Dispose();
-        job = null;
-        profileDirectory = null;
+        // The launch process normally hands off to an existing Chromium
+        // process. Do not close it: it may share the user's browser session.
+        launchProcess?.Dispose();
+        launchProcess = null;
     }
 
     public void Dispose() => Stop();

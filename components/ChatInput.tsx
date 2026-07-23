@@ -10,6 +10,7 @@ import {
 import { FolderIcon, getFileIcon } from "./FileIcons";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
+import { useT } from "@/lib/i18n";
 
 export interface AttachedImage {
   data: string;   // base64, no prefix
@@ -200,6 +201,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   draftKey,
   cwd,
 }: Props, ref) {
+  const { t } = useT();
   const isMobile = useIsMobile();
   const [value, setValue] = useState(() => (draftKey ? getDraft(draftKey)?.value ?? "" : ""));
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
@@ -1316,9 +1318,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             onPaste={handlePaste}
             placeholder={
               isStreaming && (onSteer || onFollowUp)
-                ? "Steer now / queue follow-up..."
-                : isStreaming ? "Agent is running…"
-                : "Message… Type / for commands, @ for files"
+                ? t("chat.steerPlaceholder")
+                : isStreaming ? t("chat.runningPlaceholder")
+                : t("chat.placeholder")
             }
             rows={1}
             style={{

@@ -553,11 +553,19 @@ internal sealed class LauncherForm : Form
         Close();
     }
 
-    private async void OnFormClosing(object? sender, FormClosingEventArgs eventArgs)
+    private void OnFormClosing(object? sender, FormClosingEventArgs eventArgs)
     {
         if (closing) return;
+
+        if (eventArgs.CloseReason == CloseReason.WindowsShutDown) return;
+
+        // This floating form is the launcher surface, not a stop command. It
+        // can receive a close request while Windows is changing foreground
+        // windows, so keep the service and the browser alive in the tray.
         eventArgs.Cancel = true;
-        await ExitAsync();
+        expanded = false;
+        panel.Hide();
+        Hide();
     }
 
     protected override void Dispose(bool disposing)

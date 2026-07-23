@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useT } from "@/lib/i18n";
 import type { PackageUpdateInfo, UpdateStatus, UpdateTarget, UpdateUpgradeEvent } from "@/lib/api-types";
 
 interface UpdateConfigProps {
@@ -56,12 +57,13 @@ async function streamUpgrade(
 }
 
 function VersionRow({ info, label }: { info: PackageUpdateInfo; label: string }) {
+  const { t } = useT();
   const hasUpdate = info.updateAvailable;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0" }}>
       <span style={{ width: 190, flexShrink: 0, fontSize: 12, color: "var(--text-muted)" }}>{label}</span>
       <code style={{ fontSize: 12, color: "var(--text)", fontFamily: "var(--font-mono)" }}>
-        {info.current ?? "未知"}
+        {info.current ?? t("update.unknown")}
       </code>
       {hasUpdate && info.latest && (
         <>
@@ -72,17 +74,18 @@ function VersionRow({ info, label }: { info: PackageUpdateInfo; label: string })
           <span style={{
             fontSize: 10, padding: "1px 6px", borderRadius: 8,
             background: "var(--accent)", color: "#fff", fontWeight: 600,
-          }}>可更新</span>
+          }}>{t("update.available")}</span>
         </>
       )}
       {info.error && (
-        <span style={{ fontSize: 11, color: "#ef4444" }}>检查失败：{info.error}</span>
+        <span style={{ fontSize: 11, color: "#ef4444" }}>{t("update.checkFailed", { error: info.error })}</span>
       )}
     </div>
   );
 }
 
 export function UpdateConfig({ onClose, onUpdated }: UpdateConfigProps) {
+  const { t } = useT();
   const isMobile = useIsMobile();
   const [status, setStatus] = useState<UpdateStatus | null>(null);
   const [checking, setChecking] = useState(false);
@@ -133,12 +136,12 @@ export function UpdateConfig({ onClose, onUpdated }: UpdateConfigProps) {
         } else if (event.type === "done") {
           if (event.restart) {
             setRestarting(true);
-            setLogs((prev) => [...prev, "升级完成，正在重启服务，请稍候…窗口会自动刷新到新版本。"]);
+            setLogs((prev) => [...prev, t("update.restartingDesc")]);
             onUpdated?.();
           }
         } else if (event.type === "error") {
           setError(event.message);
-          setLogs((prev) => [...prev, `错误：${event.message}`]);
+          setLogs((prev) => [...prev, t("update.upgradeFailed", { error: event.message })]);
         }
       }, controller.signal);
     } catch (err) {
@@ -148,7 +151,7 @@ export function UpdateConfig({ onClose, onUpdated }: UpdateConfigProps) {
     } finally {
       setUpgrading(false);
     }
-  }, [onUpdated]);
+  }, [onUpdated, t]);
 
   const busy = upgrading || restarting;
 
@@ -166,8 +169,8 @@ export function UpdateConfig({ onClose, onUpdated }: UpdateConfigProps) {
         {/* Header */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 18px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-            <span style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>更新</span>
-            <span style={{ fontSize: 11, color: "var(--text-muted)" }}>升级 pi 内核与 pi-web 应用</span>
+            <span style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>{t("update.title")}</span>
+            <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{t("update.versionInfo")}</span>
           </div>
           <button
             onClick={onClose}
@@ -181,7 +184,7 @@ export function UpdateConfig({ onClose, onUpdated }: UpdateConfigProps) {
           {/* 版本信息 */}
           <section>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-              <h3 style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "var(--text)" }}>当前版本</h3>
+              <h3 style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{t("update.currentVersion")}</h3>
               <button
                 onClick={() => void loadStatus(true)}
                 disabled={checking || busy}
@@ -190,7 +193,7 @@ export function UpdateConfig({ onClose, onUpdated }: UpdateConfigProps) {
                   border: "1px solid var(--border)", background: "var(--bg-panel)",
                   color: "var(--text)", cursor: checking || busy ? "default" : "pointer", opacity: checking || busy ? 0.5 : 1,
                 }}
-              >{checking ? "检查中…" : "检查更新"}</button>
+              >{checking ? t("update.checking") : t("update.checkUpdate")}</button>
             </div>
             {status ? (
               <div style={{ borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)", padding: "4px 0" }}>
@@ -203,7 +206,7 @@ export function UpdateConfig({ onClose, onUpdated }: UpdateConfigProps) {
               <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{checking ? "正在读取版本信息…" : "无版本信息"}</div>
             )}
             {status && !kernelUpdateAvailable && !appUpdateAvailable && !checking && (
-              <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-muted)" }}>✅ 已是最新版本</div>
+              <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-muted)" }}>{t("update.upToDate")}</div>
             )}
           </section>
 
@@ -221,7 +224,7 @@ export function UpdateConfig({ onClose, onUpdated }: UpdateConfigProps) {
                 opacity: busy || !kernelUpdateAvailable ? 0.55 : 1, fontWeight: 600,
                 border: "1px solid var(--border)",
               }}
-            >{upgrading ? "升级中…" : "升级内核"}</button>
+            >{upgrading ? t("update.upgrading") : t("update.upgradeKernel")}</button>
 
             <button
               onClick={() => void runUpgrade("app")}
@@ -235,7 +238,7 @@ export function UpdateConfig({ onClose, onUpdated }: UpdateConfigProps) {
                 opacity: busy || !appUpdateAvailable ? 0.55 : 1, fontWeight: 600,
                 border: "1px solid var(--border)",
               }}
-            >{upgrading ? "升级中…" : "升级应用"}</button>
+            >{upgrading ? t("update.upgrading") : t("update.upgradeApp")}</button>
           </section>
 
           {error && !upgrading && (
@@ -248,7 +251,7 @@ export function UpdateConfig({ onClose, onUpdated }: UpdateConfigProps) {
           {(logs.length > 0 || upgrading || restarting) && (
             <section style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 120 }}>
               <h3 style={{ margin: "0 0 6px", fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
-                {restarting ? "正在重启" : "升级进度"}
+                {restarting ? t("update.restarting") : t("update.progress")}
               </h3>
               <div
                 ref={logRef}
@@ -259,7 +262,7 @@ export function UpdateConfig({ onClose, onUpdated }: UpdateConfigProps) {
                   whiteSpace: "pre-wrap", wordBreak: "break-all",
                 }}
               >
-                {logs.length === 0 ? "等待输出…" : logs.join("\n")}
+                {logs.length === 0 ? t("update.waiting") : logs.join("\n")}
               </div>
             </section>
           )}
@@ -268,8 +271,8 @@ export function UpdateConfig({ onClose, onUpdated }: UpdateConfigProps) {
         {/* 重启遮罩 */}
         {restarting && (
           <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12, borderRadius: 10 }}>
-            <div style={{ fontSize: 14, color: "#fff", fontWeight: 600 }}>正在重启服务…</div>
-            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.75)" }}>启动器会自动拉起新版本并刷新窗口，请稍候</div>
+            <div style={{ fontSize: 14, color: "#fff", fontWeight: 600 }}>{t("update.restartingOverlay")}</div>
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.75)" }}>{t("update.restartingOverlayDesc")}</div>
           </div>
         )}
       </div>
