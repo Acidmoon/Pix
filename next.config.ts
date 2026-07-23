@@ -13,7 +13,9 @@ const nextConfig: NextConfig = {
   // 显式指定追踪根目录，避免仓库嵌套时 Next 错误推断工作区根
   outputFileTracingRoot: join(__dirname),
   serverExternalPackages: [
+    "undici",
     "@earendil-works/pi-coding-agent",
+    "@earendil-works/pi-agent-core",
     "@earendil-works/pi-ai",
     "@earendil-works/pi-tui",
     "sherpa-onnx-node",
