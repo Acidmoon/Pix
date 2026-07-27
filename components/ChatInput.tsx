@@ -1922,16 +1922,14 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                         </div>
                       ) : modelsByProvider.map((group, gi) => (
                         <div key={group.provider}>
-                          {(modelsByProvider.length > 1 || renderProviderQuota(group.provider)) && (
+                          {(modelsByProvider.length > 1) && (
                             <div style={{
-                              display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16,
                               padding: "6px 12px 4px",
                               fontSize: 10, fontWeight: 600, color: "var(--text-dim)",
                               textTransform: "uppercase", letterSpacing: "0.07em",
                               borderTop: gi > 0 ? "1px solid var(--border)" : "none",
                             }}>
-                              <span>{group.provider}</span>
-                              {renderProviderQuota(group.provider)}
+                              {group.provider}
                             </div>
                           )}
                           {group.options.map((opt) => {
@@ -1966,6 +1964,12 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                     );
                   })()}
                 </div>
+            )}
+            {/* 当前模型厂商的余额/配额，显示在模型按钮右侧（/api/quotas） */}
+            {model?.provider && renderProviderQuota(model.provider) && (
+              <span style={{ fontSize: 11, whiteSpace: "nowrap", flexShrink: 0, alignSelf: "center" }}>
+                {renderProviderQuota(model.provider)}
+              </span>
             )}
           </div>
 
