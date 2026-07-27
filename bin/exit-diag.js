@@ -1,4 +1,5 @@
 "use strict";
+/* eslint-disable @typescript-eslint/no-require-imports, @typescript-eslint/no-unused-vars */
 // 诊断脚本（临时）：被 next 子进程通过 NODE_OPTIONS --require 加载。
 // 目的：区分 Pi Web 退出原因是「自身 process.exit」（shutdown/restart route）
 // 还是「外部 TerminateProcess」（WindowsJobObject KILL_ON_JOB_CLOSE / 杀软）。

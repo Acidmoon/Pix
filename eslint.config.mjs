@@ -3,7 +3,7 @@ import typescript from "eslint-config-next/typescript";
 
 const eslintConfig = [
   {
-    ignores: ["PixApp/**"],
+    ignores: ["PixApp/**", "logs/**"],
   },
   ...coreWebVitals,
   ...typescript,
