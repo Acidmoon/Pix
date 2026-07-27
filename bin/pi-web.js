@@ -51,10 +51,16 @@ if (hostname) nextArgs.push("-H", hostname);
 
 // Always run next's JS entry with node directly — avoids .bin symlink issues
 // and path-with-spaces problems on Windows when shell: true is used.
+//
+// 诊断（临时）：让 next 子进程通过 NODE_OPTIONS --require 加载 exit-diag.js，
+// 记录退出原因，区分自身 process.exit 与外部 TerminateProcess（job kill / 杀软）。
+// 仅在 PI_WEB_LOG_PATH 追加日志，不改行为；定位完会移除。
+const exitDiagPath = path.join(__dirname, "exit-diag.js").replace(/\\/g, "/");
+const exitDiagOpts = `--require ${exitDiagPath}`;
 const child = spawn(process.execPath, [nextBin, ...nextArgs], {
   cwd: pkgDir,
   stdio: ["ignore", "pipe", "pipe"],
-  env: { ...process.env },
+  env: { ...process.env, NODE_OPTIONS: [process.env.NODE_OPTIONS, exitDiagOpts].filter(Boolean).join(" ") },
 });
 
 writeServiceLog(`Starting ${process.execPath} ${nextBin} ${nextArgs.join(" ")}`);
