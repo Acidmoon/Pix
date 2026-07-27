@@ -18,9 +18,11 @@ export function normalizeDirectory(directory: string): string {
 }
 
 export function getParentDirectory(directory: string): string | null {
+  // 非 Windows 盘符/UNC 路径一律按 POSIX 语义处理，避免在 Windows 上把
+  // "/Users/alex" 规范化成 "\Users\alex"（上游在 Windows 下的测试失败点）。
   const pathApi = /^[a-zA-Z]:[\\/]/.test(directory) || directory.startsWith("\\\\")
     ? path.win32
-    : path;
+    : path.posix;
   const normalized = pathApi.normalize(directory);
   const parent = pathApi.dirname(normalized);
   return parent === normalized ? null : parent;

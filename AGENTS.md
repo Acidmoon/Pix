@@ -52,31 +52,47 @@ app/api/
   auth/login/[provider]/route.ts  GET OAuth/device-code SSE | POST manual code
   auth/logout/[provider]/route.ts POST OAuth logout
   auth/providers/route.ts         GET OAuth provider list
+  cwd/browse/route.ts             GET browsable server directory listing (DirectoryPicker)
   cwd/validate/route.ts           POST validate/select a cwd
   default-cwd/route.ts            POST create ~/pi-cwd-YYYYMMDD
+  file-index/route.ts             GET file index for @-mention fuzzy search
   files/[...path]/route.ts        GET file contents for viewer
+  git/diff/route.ts               GET git diff for changed files
+  git/status/route.ts             GET git status for the Explorer badge
+  health/route.ts                 GET readiness probe (no auth, used by launcher)
   home/route.ts                   GET user home directory
+  launcher/status/route.ts        GET balances & quota (Bearer PI_WEB_LAUNCHER_TOKEN)
+  launcher/shutdown/route.ts      POST graceful stop (Bearer PI_WEB_LAUNCHER_TOKEN)
   models/route.ts                 GET { models, modelList, defaultModel }
   models-config/route.ts          GET/PUT — read/write ~/.pi/agent/models.json
   models-config/test/route.ts     POST test a configured model/provider
   plugins/route.ts                GET/POST package plugin management
+  sessions/[id]/auto-name/route.ts POST auto-generate session title
+  sessions/[id]/state/route.ts    GET lightweight live state
   skills/route.ts                 GET/PATCH loaded skills and disable-model-invocation
+  skills/check/route.ts           GET check skill updates
   skills/install/route.ts         POST install skills through npx skills add
   skills/search/route.ts          GET/POST skills.sh search
+  skills/update/route.ts          POST update an installed skill
   worktrees/route.ts              GET/POST/DELETE git worktrees
+  voice/status/route.ts           GET voice model availability
   voice/transcribe/route.ts       POST raw Float32 PCM (X-Sample-Rate header) → { text }
   update/status/route.ts          GET current/latest versions + updateAvailable (npm registry)
   update/upgrade/route.ts         POST SSE — upgrade kernel/app, then trigger launcher restart
 
 lib/
   agent-client.ts      typed fetch helper for /api/agent commands
+  directory-browser.ts directory normalization + safe listing for cwd/browse
   draft-store.ts       local draft persistence helpers
   file-access.ts       allowed file roots for /api/files and worktrees
   file-paths.ts        client/server path encoding helpers
+  http-dispatcher.ts   HTTP(S) proxy dispatcher for server-side fetch (HTTP_PROXY/NO_PROXY)
   markdown.ts          shared markdown helpers
   npx.ts               npx runner used by skill install
+  path-security.ts     path traversal/symlink guards shared by file routes
   provider-quotas.ts   厂商额度查询注册表（DeepSeek/MiniMax/Kimi，配置走 QUOTA_* env）
   pi-types.ts          local structural types for pi SDK objects
+  request-security.ts  LAN origin/host validation for non-loopback bindings
   rpc-manager.ts      AgentSessionWrapper + registry + startRpcSession
   session-reader.ts   SessionManager wrappers + path cache + buildSessionContext adapter
   tool-presets.ts     PRESET_NONE/DEFAULT/FULL + getPresetFromTools()
@@ -90,18 +106,23 @@ lib/
 
 bin/
   pi-web.js           node entry that runs `next start` (spawned by the launcher)
+  pi-web-options.js   CLI/env option parsing (--port/--hostname/--no-open, default 127.0.0.1)
+  node-version.js     Node >=22.19 preflight check
   apply-update.js     whole-app file swap + dep sync, run by the launcher before restart
 
 components/
   AppShell.tsx        layout + URL state + tab management
   SessionSidebar.tsx  session tree + FileExplorer
+  DirectoryPicker.tsx browsable/editable working-directory picker (backed by cwd/browse)
   ChatWindow.tsx      chat composition + completion sound wrapper
   ChatInput.tsx       input bar + model/thinking/tools/compact controls
   MessageView.tsx     renders one message (user/assistant/toolCall/toolResult)
   BranchNavigator.tsx in-session branch switcher
   ChatMinimap.tsx     scroll minimap alongside the message list
   MarkdownBody.tsx    markdown renderer
+  MermaidBlock.tsx    mermaid diagram block used by MarkdownBody
   ModelsConfig.tsx    modal for editing models.json (opened from sidebar bottom)
+  SettingsModal.tsx   localized app settings modal
   PluginsConfig.tsx   modal for installed package plugins
   SkillsConfig.tsx    modal for loaded/search/installable skills
   FileExplorer.tsx    file tree inside sidebar
