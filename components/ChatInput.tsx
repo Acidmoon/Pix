@@ -29,6 +29,15 @@ interface ModelOption {
   name: string;
 }
 
+// /api/quotas 的响应结构（服务端 lib/provider-quotas.ts 的镜像，客户端本地定义）
+interface ProviderQuotaSummary {
+  id: string;
+  displayName: string;
+  status: "available" | "not_configured" | "error";
+  balances?: Array<{ currency: string; total: number; granted: number; toppedUp: number }>;
+  tiers?: Array<{ name: string; label: string; remainingPercent: number; resetsAt?: string }>;
+}
+
 interface Props {
   onSend: (message: string, images?: AttachedImage[]) => void;
   onAbort: () => void;
@@ -88,16 +97,6 @@ function compareModelOptions(a: ModelOption, b: ModelOption): number {
 }
 
 const THINKING_LEVELS = ["auto", "off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
-const THINKING_LEVEL_DESC: Record<typeof THINKING_LEVELS[number], string> = {
-  auto: "Use pi default",
-  off: "Reasoning off",
-  minimal: "Minimal reasoning",
-  low: "Low reasoning",
-  medium: "Medium reasoning",
-  high: "High reasoning",
-  xhigh: "Extra-high reasoning",
-  max: "Max reasoning",
-};
 
 function formatTokenCount(tokens: number): string {
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
@@ -113,22 +112,7 @@ type SlashCommandPaletteItem = SlashCommandInfo | {
 
 type SlashCommandSource = SlashCommandPaletteItem["source"];
 
-const BUILTIN_SLASH_COMMANDS: SlashCommandPaletteItem[] = [
-  { name: "compact", description: "Compress context, optionally with instructions", source: "builtin" },
-  { name: "reload", description: "Reload extensions, skills, prompts, and tools", source: "builtin" },
-  { name: "name", description: "Set the session display name", source: "builtin" },
-  { name: "session", description: "Show session message, token, and cost stats", source: "builtin" },
-  { name: "copy", description: "Copy the last assistant message", source: "builtin" },
-];
-
 const SLASH_SOURCES: SlashCommandSource[] = ["builtin", "extension", "prompt", "skill"];
-
-const SLASH_SOURCE_GROUP_LABEL: Record<SlashCommandSource, string> = {
-  builtin: "Built-in",
-  extension: "Extensions",
-  prompt: "Prompts",
-  skill: "Skills",
-};
 
 const SLASH_SOURCE_ORDER: Record<SlashCommandSource, number> = {
   builtin: 0,
@@ -172,6 +156,7 @@ function revokeImagePreview(image: AttachedImage): void {
 }
 
 function QueuedMessageRow({ kind, text }: { kind: "steer" | "follow-up"; text: string }) {
+  const { t } = useT();
   return (
     <div
       title={text}
@@ -196,7 +181,7 @@ function QueuedMessageRow({ kind, text }: { kind: "steer" | "follow-up"; text: s
           color: kind === "steer" ? "var(--accent)" : "var(--text-dim)",
         }}
       >
-        {kind}
+        {kind === "steer" ? t("chatinput.queuedSteer") : t("chatinput.queuedFollowUp")}
       </span>
       <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{text}</span>
     </div>
@@ -204,6 +189,7 @@ function QueuedMessageRow({ kind, text }: { kind: "steer" | "follow-up"; text: s
 }
 
 export function ModelErrorBanner({ error }: { error?: string | null }) {
+  const { t } = useT();
   if (!error) return null;
   return (
     <div
@@ -241,7 +227,7 @@ export function ModelErrorBanner({ error }: { error?: string | null }) {
         <line x1="12" y1="17" x2="12.01" y2="17" />
       </svg>
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontWeight: 600 }}>Model error</div>
+        <div style={{ fontWeight: 600 }}>{t("chatinput.modelError")}</div>
         <div style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{error}</div>
       </div>
     </div>
@@ -261,6 +247,21 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   cwd,
 }: Props, ref) {
   const { t } = useT();
+  // 内置 slash 命令与来源分组标签（描述走 i18n；name 字段保持英文用于过滤排序）
+  const builtinSlashCommands: SlashCommandPaletteItem[] = [
+    { name: "compact", description: t("chatinput.slashCmd.compact"), source: "builtin" },
+    { name: "reload", description: t("chatinput.slashCmd.reload"), source: "builtin" },
+    { name: "name", description: t("chatinput.slashCmd.name"), source: "builtin" },
+    { name: "session", description: t("chatinput.slashCmd.session"), source: "builtin" },
+    { name: "copy", description: t("chatinput.slashCmd.copy"), source: "builtin" },
+  ];
+  // 扩展/提示词/技能与 pluginsconfig 词条语义一致，直接复用
+  const slashSourceGroupLabel: Record<SlashCommandSource, string> = {
+    builtin: t("chatinput.slashSourceBuiltin"),
+    extension: t("pluginsconfig.extensions"),
+    prompt: t("pluginsconfig.prompts"),
+    skill: t("pluginsconfig.skills"),
+  };
   const isMobile = useIsMobile();
   const [value, setValue] = useState(() => (draftKey ? getDraft(draftKey)?.value ?? "" : ""));
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
@@ -284,6 +285,20 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const [fileIndex, setFileIndex] = useState<{ cwd: string; entries: FileIndexEntry[]; truncated: boolean } | null>(null);
   const [fileIndexLoading, setFileIndexLoading] = useState(false);
   const [atServerResult, setAtServerResult] = useState<{ cwd: string; query: string; matches: FileIndexEntry[] } | null>(null);
+
+  // 厂商余额/配额：模型选择器厂商组头右侧内联显示（/api/quotas，服务端 60s 缓存）
+  const [quotaData, setQuotaData] = useState<{
+    providers: ProviderQuotaSummary[];
+    providerKeys: Record<string, string[]>;
+  } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/quotas")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (!cancelled && data?.providers) setQuotaData(data); })
+      .catch(() => { /* 余额查询失败不影响输入框 */ });
+    return () => { cancelled = true; };
+  }, []);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -523,7 +538,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
 
   const filteredSlashCommands = (() => {
     if (slashQuery === null) return [];
-    const commands = [...(isStreaming ? [] : BUILTIN_SLASH_COMMANDS), ...(slashCommands ?? [])];
+    const commands = [...(isStreaming ? [] : builtinSlashCommands), ...(slashCommands ?? [])];
     return [...commands]
       .filter((command) => {
         const name = command.name.toLowerCase();
@@ -552,8 +567,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   })();
 
   const slashCommandCountLabel = filteredSlashCommands.length === 1
-    ? (slashQuery ? "1 match" : "1 command")
-    : `${filteredSlashCommands.length} ${slashQuery ? "matches" : "commands"}`;
+    ? (slashQuery ? t("chatinput.matchCountOne") : t("chatinput.commandCountOne"))
+    : slashQuery
+      ? t("chatinput.matchCount", { n: filteredSlashCommands.length })
+      : t("chatinput.commandCount", { n: filteredSlashCommands.length });
   const hasInputText = Boolean(value.trim());
   const canQueueStreamingMessage = hasInputText && attachedImages.length === 0;
 
@@ -993,6 +1010,55 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     else modelsByProvider.push({ provider: opt.provider, options: [opt] });
   }
 
+  // 把模型分组里的 provider 关联到厂商账户（providerKeys 由 /api/quotas 提供）
+  const quotaForProvider = (provider: string): ProviderQuotaSummary | null => {
+    if (!quotaData) return null;
+    const target = provider.toLowerCase();
+    for (const [id, keys] of Object.entries(quotaData.providerKeys)) {
+      if (keys.some((k) => k.toLowerCase() === target)) {
+        return quotaData.providers.find((s) => s.id === id) ?? null;
+      }
+    }
+    return null;
+  };
+
+  // 组头右侧的内联余额/配额：余额型 ¥xx.xx（<¥5 红色告警），
+  // 配额窗口型 xx%|xx%（任一 <20% 该项红色告警），未配置/查询失败不显示
+  const renderProviderQuota = (provider: string): React.ReactNode => {
+    const summary = quotaForProvider(provider);
+    if (!summary || summary.status !== "available") return null;
+    const baseStyle: React.CSSProperties = { textTransform: "none", letterSpacing: "normal", fontWeight: 400 };
+    if (summary.balances && summary.balances.length > 0) {
+      return (
+        <span style={baseStyle} title={summary.displayName}>
+          {summary.balances.map((b, i) => (
+            <span key={b.currency}>
+              {i > 0 && <span style={{ color: "var(--text-dim)" }}> </span>}
+              <span style={{ color: b.total < 5 ? "#ef4444" : "var(--text-dim)" }}>
+                {b.currency === "CNY" ? "¥" : b.currency === "USD" ? "$" : `${b.currency} `}{b.total.toFixed(2)}
+              </span>
+            </span>
+          ))}
+        </span>
+      );
+    }
+    if (summary.tiers && summary.tiers.length > 0) {
+      return (
+        <span style={baseStyle} title={summary.displayName}>
+          {summary.tiers.map((tier, i) => (
+            <React.Fragment key={tier.name}>
+              {i > 0 && <span style={{ color: "var(--text-dim)" }}> | </span>}
+              <span style={{ color: tier.remainingPercent < 20 ? "#ef4444" : "var(--text-dim)" }}>
+                {Math.round(tier.remainingPercent)}%
+              </span>
+            </React.Fragment>
+          ))}
+        </span>
+      );
+    }
+    return null;
+  };
+
   const displayModelName = model
     ? (modelOptions.find((o) => o.modelId === model.modelId && o.provider === model.provider)?.name ?? model.modelId)
     : null;
@@ -1001,11 +1067,19 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const compactSavedTokens = compactResult
     ? Math.max(0, compactResult.tokensBefore - compactResult.estimatedTokensAfter)
     : 0;
-  const compactVerb = compactResult?.reason && compactResult.reason !== "manual"
-    ? `${compactResult.reason[0].toUpperCase()}${compactResult.reason.slice(1)} compacted`
-    : "Compacted";
   const compactResultText = compactResult
-    ? `${compactVerb} ${formatTokenCount(compactResult.tokensBefore)} -> ${formatTokenCount(compactResult.estimatedTokensAfter)} tokens (${formatTokenCount(compactSavedTokens)} saved)`
+    ? (compactResult.reason && compactResult.reason !== "manual"
+      ? t("chatinput.compactResultAuto", {
+        reason: `${compactResult.reason[0].toUpperCase()}${compactResult.reason.slice(1)}`,
+        before: formatTokenCount(compactResult.tokensBefore),
+        after: formatTokenCount(compactResult.estimatedTokensAfter),
+        saved: formatTokenCount(compactSavedTokens),
+      })
+      : t("chatinput.compactResult", {
+        before: formatTokenCount(compactResult.tokensBefore),
+        after: formatTokenCount(compactResult.estimatedTokensAfter),
+        saved: formatTokenCount(compactSavedTokens),
+      }))
     : null;
   const thinkingDisplayLabel = (() => {
     const lvl = thinkingLevel ?? "auto";
@@ -1094,12 +1168,12 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 textTransform: "uppercase",
                 letterSpacing: 0.4,
               }}>
-                Queued · {(queuedMessages?.steering.length ?? 0) + (queuedMessages?.followUp.length ?? 0)}
+                {t("chatinput.queuedCount", { n: (queuedMessages?.steering.length ?? 0) + (queuedMessages?.followUp.length ?? 0) })}
               </span>
               {onRecallQueue && (
                 <button
                   onClick={onRecallQueue}
-                  title="Remove all queued messages and put them back into the input box for editing"
+                  title={t("chatinput.recallQueueTitle")}
                   style={{
                     display: "flex",
                     alignItems: "center",
@@ -1127,7 +1201,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                     <polyline points="9 14 4 9 9 4" />
                     <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
                   </svg>
-                  Recall to input
+                  {t("chatinput.recallToInput")}
                 </button>
               )}
             </div>
@@ -1151,7 +1225,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
               <path d="M3 3v5h5" />
             </svg>
-            Retrying ({retryInfo.attempt}/{retryInfo.maxAttempts})…{retryInfo.errorMessage && <span style={{ opacity: 0.7, marginLeft: 4 }}>— {retryInfo.errorMessage}</span>}
+            {t("chatinput.retrying", { attempt: retryInfo.attempt, max: retryInfo.maxAttempts })}{retryInfo.errorMessage && <span style={{ opacity: 0.7, marginLeft: 4 }}>— {retryInfo.errorMessage}</span>}
           </div>
         )}
         {compactResultText && (
@@ -1217,7 +1291,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               }}
             >
               <div
-                title="Input history"
+                title={t("chatinput.inputHistory")}
                 style={{
                   height: 30,
                   padding: "0 10px",
@@ -1314,13 +1388,13 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   color: "var(--text-dim)",
                 }}
               >
-                <span>{slashCommandsLoading ? "Loading commands..." : `Slash commands · ${slashCommandCountLabel}`}</span>
+                <span>{slashCommandsLoading ? t("chatinput.loadingCommands") : `${t("chatinput.slashCommandsTitle")} · ${slashCommandCountLabel}`}</span>
                 <span style={{ fontFamily: "var(--font-mono)" }}>Tab / Enter</span>
               </div>
               <div style={{ maxHeight: "calc(min(56vh, 460px) - 34px)", overflowY: "auto", padding: 10 }}>
                 {!slashCommandsLoading && filteredSlashCommands.length === 0 ? (
                   <div style={{ padding: "2px 2px 4px", fontSize: 12, color: "var(--text-dim)" }}>
-                    No extension, prompt, or skill commands found
+                    {t("chatinput.noSlashCommands")}
                   </div>
                 ) : (
                   groupedSlashCommands.map((group) => (
@@ -1342,7 +1416,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                           textTransform: "uppercase",
                         }}
                       >
-                        <span>{SLASH_SOURCE_GROUP_LABEL[group.source]}</span>
+                        <span>{slashSourceGroupLabel[group.source]}</span>
                         <span style={{ fontFamily: "var(--font-mono)", fontWeight: 500 }}>{group.items.length}</span>
                       </div>
                       <div
@@ -1417,12 +1491,14 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           )}
           {atMenuOpen && atQuery !== null && (() => {
             const indexLoading = fileIndexLoading && (!fileIndex || fileIndex.cwd !== cwd);
-            const matchCountLabel = atMatches.length === 1 ? "1 match" : `${atMatches.length} matches`;
+            const matchCountLabel = atMatches.length === 1
+              ? t("chatinput.matchCountOne")
+              : t("chatinput.matchCount", { n: atMatches.length });
             // With a truncated index, local results are provisional — the
             // debounced server search over the full listing replaces them.
             const truncatedHint = fileIndex?.truncated && !serverResultInUse
-              ? (atQuery.query ? " · searching all files…" : " · index truncated")
-              : "";
+              ? (atQuery.query ? t("chatinput.searchingAllFiles") : t("chatinput.indexTruncated"))
+              : null;
             return (
               <div
                 style={{
@@ -1453,15 +1529,15 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 >
                   <span>
                     {indexLoading
-                      ? "Loading files..."
-                      : `Files · ${matchCountLabel}${truncatedHint}`}
+                      ? t("chatinput.loadingFiles")
+                      : `${t("chatinput.filesTitle")} · ${matchCountLabel}${truncatedHint ? ` · ${truncatedHint}` : ""}`}
                   </span>
                   <span style={{ fontFamily: "var(--font-mono)" }}>Tab / Enter</span>
                 </div>
                 <div style={{ maxHeight: "calc(min(48vh, 400px) - 34px)", overflowY: "auto", padding: 4 }}>
                   {!indexLoading && atMatches.length === 0 ? (
                     <div style={{ padding: "6px 8px", fontSize: 12, color: "var(--text-dim)" }}>
-                      {needsServerSearch && !serverResultInUse ? "Searching…" : "No matching files"}
+                      {needsServerSearch && !serverResultInUse ? t("chatinput.searching") : t("chatinput.noMatchingFiles")}
                     </div>
                   ) : (
                     atMatches.map((entry, index) => {
@@ -1580,7 +1656,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 <button
                   onClick={() => sendQueued("steer")}
                   disabled={!canQueueStreamingMessage}
-                  title={attachedImages.length ? "Image attachments cannot be queued while the agent is running" : "Interrupt the current run and inject this message now"}
+                  title={attachedImages.length ? t("chatinput.imageQueueBlocked") : t("chatinput.steerTitle")}
                   style={{
                     display: "flex", alignItems: "center", gap: 5,
                     padding: "7px 12px",
@@ -1596,14 +1672,14 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M5 1 L9 5 L5 9" /><line x1="1" y1="5" x2="9" y2="5" />
                   </svg>
-                  Steer
+                  {t("chatinput.steer")}
                 </button>
               )}
               {onFollowUp && (
                 <button
                   onClick={() => sendQueued("followup")}
                   disabled={!canQueueStreamingMessage}
-                  title={attachedImages.length ? "Image attachments cannot be queued while the agent is running" : "Queue this message after the agent finishes"}
+                  title={attachedImages.length ? t("chatinput.imageQueueBlocked") : t("chatinput.followUpTitle")}
                   style={{
                     display: "flex", alignItems: "center", gap: 5,
                     padding: "7px 12px",
@@ -1620,7 +1696,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                     <line x1="5" y1="1" x2="5" y2="6" /><polyline points="2.5 3.5 5 1 7.5 3.5" />
                     <line x1="2" y1="9" x2="8" y2="9" />
                   </svg>
-                  Follow-up
+                  {t("chatinput.followUp")}
                 </button>
               )}
             </div>
@@ -1649,7 +1725,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 <line x1="2" y1="7" x2="11" y2="7" />
                 <polyline points="7.5 3 12 7 7.5 11" />
               </svg>
-              Send
+              {t("chat.send")}
             </button>
           )}
           </div>
@@ -1658,7 +1734,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         {/* Bash mode status label */}
         {bashMode && (
           <div className="text-xs px-2 py-1" style={{ color: bashExcluded ? "var(--text-muted)" : "var(--accent)", marginTop: 4 }}>
-            Shell · {bashExcluded ? "output stays local" : "output sent to model"}
+            Shell · {bashExcluded ? t("chatinput.shellOutputLocal") : t("chatinput.shellOutputModel")}
           </div>
         )}
 
@@ -1676,7 +1752,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={isStreaming}
-              title="Attach image"
+              title={t("chatinput.attachImage")}
               style={{
                 flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
                 width: 32, height: 32, padding: 0,
@@ -1707,14 +1783,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             <button
               onClick={() => {
                 if (voiceModelReady === false) {
-                  window.alert(
-                    "Voice model is not installed.\n\n"
-                    + "Download sherpa-onnx SenseVoice (int8):\n"
-                    + "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17\n\n"
-                    + "Put model.int8.onnx and tokens.txt into:\n"
-                    + voiceModelDirRef.current + "\n\n"
-                    + "(or point PIX_VOICE_MODEL_DIR at your model folder)",
-                  );
+                  window.alert(t("chatinput.voiceModelMissingAlert", { dir: voiceModelDirRef.current }));
                   return;
                 }
                 voice.toggle();
@@ -1722,15 +1791,15 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               disabled={isStreaming || voice.state === "transcribing" || voice.state === "requesting"}
               title={
                 voiceModelReady === false
-                  ? "Voice model not installed — click for setup"
+                  ? t("chatinput.voiceModelMissing")
                   : voiceError
                     ?? (voice.state === "recording"
-                      ? `Recording ${voice.seconds}s — click to stop`
+                      ? t("chatinput.voiceRecording", { s: voice.seconds })
                       : voice.state === "requesting"
-                        ? "Requesting microphone…"
+                        ? t("chatinput.voiceRequesting")
                         : voice.state === "transcribing"
-                          ? "Transcribing…"
-                          : "Voice input")
+                          ? t("voice.statusRecognizing")
+                          : t("chatinput.voiceInput"))
               }
               style={{
                 flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
@@ -1815,7 +1884,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                       e.currentTarget.style.background = modelDropdownOpen ? "var(--bg-hover)" : "none";
                       e.currentTarget.style.color = "var(--text-muted)";
                     }}
-                    title={modelOptions.length > 0 ? "Change model" : "No available models"}
+                    title={modelOptions.length > 0 ? t("chatinput.changeModel") : t("chatinput.noAvailableModels")}
                   >
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <rect x="4" y="4" width="16" height="16" rx="2" />
@@ -1826,7 +1895,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                       <line x1="1" y1="9" x2="4" y2="9" /><line x1="1" y1="14" x2="4" y2="14" />
                     </svg>
                     <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
-                      {currentName ?? (modelOptions.length > 0 ? "Select model" : "No models")}
+                      {currentName ?? (modelOptions.length > 0 ? t("chatinput.selectModel") : t("chatinput.noModels"))}
                     </span>
                   </button>
                   {modelDropdownOpen && modelDropdownRect && (() => {
@@ -1849,18 +1918,20 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                       }}>
                       {modelsByProvider.length === 0 ? (
                         <div style={{ padding: "8px 12px", color: "var(--text-dim)", fontSize: 12, whiteSpace: "nowrap" }}>
-                          No available models
+                          {t("chatinput.noAvailableModels")}
                         </div>
                       ) : modelsByProvider.map((group, gi) => (
                         <div key={group.provider}>
-                          {(modelsByProvider.length > 1) && (
+                          {(modelsByProvider.length > 1 || renderProviderQuota(group.provider)) && (
                             <div style={{
+                              display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16,
                               padding: "6px 12px 4px",
                               fontSize: 10, fontWeight: 600, color: "var(--text-dim)",
                               textTransform: "uppercase", letterSpacing: "0.07em",
                               borderTop: gi > 0 ? "1px solid var(--border)" : "none",
                             }}>
-                              {group.provider}
+                              <span>{group.provider}</span>
+                              {renderProviderQuota(group.provider)}
                             </div>
                           )}
                           {group.options.map((opt) => {
@@ -1913,8 +1984,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             {isMobile && (
               <button
                 type="button"
-                title={controlsMenuOpen ? undefined : "More controls"}
-                aria-label="More controls"
+                title={controlsMenuOpen ? undefined : t("chatinput.moreControls")}
+                aria-label={t("chatinput.moreControls")}
                 aria-expanded={controlsMenuOpen}
                 aria-hidden={controlsMenuOpen || undefined}
                 tabIndex={controlsMenuOpen ? -1 : undefined}
@@ -1951,7 +2022,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   e.currentTarget.style.color = "var(--text-muted)";
                 }}
               >
-                More
+                {t("chatinput.more")}
               </button>
             )}
             <div style={{
@@ -1980,8 +2051,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 <button
                   onClick={() => !isStreaming && setThinkingDropdownOpen((v) => !v)}
                   disabled={isStreaming}
-                  title={`Change reasoning level: ${thinkingDisplayLabel}`}
-                  aria-label="Change reasoning level"
+                  title={t("chatinput.changeReasoningLevel", { level: thinkingDisplayLabel })}
+                  aria-label={t("chatinput.changeReasoningLevelShort")}
                   style={{
                     display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
                     padding: isMobile ? "0 6px" : "8px 12px",
@@ -2026,7 +2097,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                       return availableThinkingLevels.includes(lvl);
                     }).map((lvl) => {
                       const isActive = (thinkingLevel ?? "auto") === lvl;
-                      const desc = THINKING_LEVEL_DESC[lvl];
+                      const desc = t(`chatinput.thinkingDesc.${lvl}`);
                       const mappedVal = (lvl !== "auto" && thinkingLevelMap) ? thinkingLevelMap[lvl] : undefined;
                       const displayLabel = (mappedVal != null && mappedVal !== lvl) ? mappedVal : lvl;
                       const showOriginal = mappedVal != null && mappedVal !== lvl;
@@ -2067,8 +2138,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 <button
                   onClick={() => !isStreaming && setToolDropdownOpen((v) => !v)}
                   disabled={isStreaming}
-                  title={`Change tool preset: ${toolPresetLabel}`}
-                  aria-label="Change tool preset"
+                  title={t("chatinput.changeToolPreset", { preset: toolPresetLabel })}
+                  aria-label={t("chatinput.changeToolPresetShort")}
                   style={{
                     display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
                     padding: isMobile ? "0 6px" : "8px 12px",
@@ -2108,7 +2179,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                     {TOOL_PRESETS.map((lvl) => {
                       const preset = TOOL_PRESET_MAP[lvl];
                       const isActive = (toolPreset ?? "default") === preset;
-                      const desc = lvl === "off" ? "No tools, read-only" : lvl === "default" ? "4 built-in tools" : "All built-in tools";
+                      const desc = t(`chatinput.toolPresetDesc.${lvl}`);
                       return (
                         <button
                           key={lvl}
@@ -2177,16 +2248,16 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                     e.currentTarget.style.background = isCompacting ? "rgba(239,68,68,0.08)" : "none";
                     e.currentTarget.style.color = isCompacting ? "#ef4444" : "var(--text-muted)";
                   }}
-                  title={isCompacting ? "Stop compaction" : "Compact context"}
-                  aria-label={isCompacting ? "Stop compaction" : "Compact context"}
+                  title={isCompacting ? t("chatinput.stopCompaction") : t("chatinput.compactContext")}
+                  aria-label={isCompacting ? t("chatinput.stopCompaction") : t("chatinput.compactContext")}
                 >
                   {isCompacting ? (
-                    <><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><rect x="2" y="2" width="6" height="6" rx="1" fill="currentColor" /></svg>{(!isMobile || controlsMenuOpen) && <span style={{ whiteSpace: "nowrap" }}>Compacting…</span>}</>
+                    <><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><rect x="2" y="2" width="6" height="6" rx="1" fill="currentColor" /></svg>{(!isMobile || controlsMenuOpen) && <span style={{ whiteSpace: "nowrap" }}>{t("chat.compacting")}</span>}</>
                   ) : (
                     <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <polyline points="4 14 10 14 10 20" /><polyline points="20 10 14 10 14 4" />
                       <line x1="10" y1="14" x2="3" y2="21" /><line x1="21" y1="3" x2="14" y2="10" />
-                    </svg>{(!isMobile || controlsMenuOpen) && <span style={{ whiteSpace: "nowrap" }}>Compact</span>}</>
+                    </svg>{(!isMobile || controlsMenuOpen) && <span style={{ whiteSpace: "nowrap" }}>{t("message.compact")}</span>}</>
                   )}
                 </button>
               </div>
@@ -2195,7 +2266,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             {isStreaming && (
               <button
                 onClick={onAbort}
-                title="Stop agent"
+                title={t("chatinput.stopAgent")}
                 style={{
                   display: "flex", alignItems: "center", gap: 6,
                   padding: "8px 14px",
@@ -2215,15 +2286,15 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
                   <rect x="1.5" y="1.5" width="7" height="7" rx="1.5" fill="currentColor" />
                 </svg>
-                Stop
+                {t("chat.stop")}
               </button>
             )}
 
             {onSoundToggle !== undefined && (
               <button
                 onClick={onSoundToggle}
-                title={soundEnabled ? "Disable completion sound" : "Enable completion sound"}
-                aria-label={soundEnabled ? "Disable completion sound" : "Enable completion sound"}
+                title={soundEnabled ? t("chatinput.disableSound") : t("chatinput.enableSound")}
+                aria-label={soundEnabled ? t("chatinput.disableSound") : t("chatinput.enableSound")}
                 style={{
                   display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
                   width: isMobile ? 32 : 32,
@@ -2266,8 +2337,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             {isMobile && controlsMenuOpen && (
               <button
                 type="button"
-                title="Collapse controls"
-                aria-label="Collapse controls"
+                title={t("chatinput.collapseControls")}
+                aria-label={t("chatinput.collapseControls")}
                 aria-expanded={true}
                 onClick={() => {
                   setToolDropdownOpen(false);

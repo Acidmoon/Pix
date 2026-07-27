@@ -67,6 +67,7 @@ app/api/
   models-config/route.ts          GET/PUT — read/write ~/.pi/agent/models.json
   models-config/test/route.ts     POST test a configured model/provider
   plugins/route.ts                GET/POST package plugin management
+  quotas/route.ts                 GET browser-side provider balances/quota windows (loopback, no launcher token)
   sessions/[id]/auto-name/route.ts POST auto-generate session title
   sessions/[id]/state/route.ts    GET lightweight live state
   skills/route.ts                 GET/PATCH loaded skills and disable-model-invocation
@@ -148,6 +149,11 @@ hooks/
 ---
 
 ## Key Design Decisions & Traps
+
+### i18n（`lib/i18n.tsx`）
+- 所有用户可见文案走 `useT()`，词条在 `lib/locales/zh.json` / `en.json`，两文件 key 必须保持一一对应
+- `useT` 必须在 `PixI18nProvider` 内使用——node --test 渲染组件时要包 Provider，并用 `@/lib/i18n` 别名导入（相对路径会产生第二个 context 实例）
+- 模型选择器厂商组头右侧内联显示余额/配额：数据来自 `/api/quotas`（与 `/api/launcher/status` 共用 `getProviderAccountSummaries()` 60s 缓存），余额 <¥5 或配额 <20% 显示红色
 
 ### AgentSession lifecycle (`lib/rpc-manager.ts`)
 - One `AgentSessionWrapper` per session id, keyed in `globalThis.__piSessions`

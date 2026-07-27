@@ -13,6 +13,7 @@ import { normalizeToolCalls } from "@/lib/normalize";
 import { sendAgentCommand } from "@/lib/agent-client";
 import { getToolNamesForPreset, type ToolEntry } from "@/lib/tool-presets";
 import type { SessionStatsInfo } from "@/lib/pi-types";
+import { useT } from "@/lib/i18n";
 
 export interface SessionData {
   sessionId: string;
@@ -329,6 +330,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const isNew = session === null && newSessionCwd !== null;
 
+  // 通过 ref 使用 t，避免大量 useCallback 因语言切换而重建
+  const { t } = useT();
+  const tRef = useRef(t);
+  tRef.current = t;
+
   const [data, setData] = useState<SessionData | null>(null);
   const [loading, setLoading] = useState(!isNew);
   const [error, setError] = useState<string | null>(null);
@@ -521,7 +527,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [setToolPresetState]);
 
-  const promoteNewSession = useCallback((messageCount = 0, firstMessage = "(no messages)") => {
+  const promoteNewSession = useCallback((messageCount = 0, firstMessage = tRef.current("notice.noMessages")) => {
     const sid = sessionIdRef.current;
     if (!isNew || !newSessionCwd || !sid || newSessionPromotedRef.current) return;
     newSessionPromotedRef.current = true;
@@ -916,12 +922,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         void finishPromptWithoutStream(sessionIdRef.current);
         break;
       case "prompt_error":
-        addNotice({ type: "error", message: (event.errorMessage as string | undefined) ?? "Command failed" });
+        addNotice({ type: "error", message: (event.errorMessage as string | undefined) ?? tRef.current("notice.commandFailed") });
         break;
       case "extension_error":
         addNotice({
           type: "error",
-          message: (event.error as string | undefined) ?? "Extension command failed",
+          message: (event.error as string | undefined) ?? tRef.current("notice.extensionCommandFailed"),
         });
         break;
       case "message_start":
@@ -1111,7 +1117,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
               : prev;
           });
         }
-        addNotice({ type: "error", message: e.message });
+        addNotice({
+          type: "error",
+          message: e.status === "timeout"
+            ? tRef.current("notice.eventStreamTimeout")
+            : tRef.current("notice.eventStreamFailed"),
+        });
         // The prompt never reached the agent, so restore the user's text into
         // the input instead of losing it. Mirrors the shell-command recovery in
         // executeBash; insertIfEmpty avoids clobbering anything typed since.
@@ -1133,7 +1144,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     setBashRunning(true);
     try {
       const sid = sessionIdRef.current ?? session?.id ?? await ensureNewSession();
-      if (!sid) throw new Error("Unable to create a session for the shell command");
+      if (!sid) throw new Error(tRef.current("notice.noSessionForShell"));
       await sendAgentCommand(sid, {
         type: "bash",
         command,
@@ -1287,7 +1298,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (result.error) {
         addNotice({ type: "error", message: result.error });
       } else if (result.action !== "openSessionStats") {
-        addNotice({ type: "success", message: result.message ?? "Command completed" });
+        addNotice({ type: "success", message: result.message ?? tRef.current("notice.commandCompleted") });
       }
       return result;
     };
@@ -1295,7 +1306,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     try {
       switch (commandName) {
         case "compact": {
-          if (!sid || isCompacting) return complete({ handled: true, error: "No active session to compact" });
+          if (!sid || isCompacting) return complete({ handled: true, error: tRef.current("notice.noActiveSessionCompact") });
           setIsCompacting(true);
           setCompactError(null);
           setCompactResult(null);
@@ -1305,11 +1316,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           });
           setCompactResult(readCompactResult(result, "manual"));
           if (await loadSession(sid, true)) promoteNewSession();
-          return complete({ handled: true, message: "Compacted context" });
+          return complete({ handled: true, message: tRef.current("notice.compactedContext") });
         }
 
         case "reload": {
-          if (!sid) return complete({ handled: true, error: "No active session to reload" });
+          if (!sid) return complete({ handled: true, error: tRef.current("notice.noActiveSessionReload") });
           await sendAgentCommand(sid, { type: "reload" });
           await Promise.all([
             loadSession(sid, false, true),
@@ -1317,19 +1328,19 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             loadSlashCommands(),
             loadModels(),
           ]);
-          return complete({ handled: true, message: "Reloaded session resources" });
+          return complete({ handled: true, message: tRef.current("notice.reloadedResources") });
         }
 
         case "name": {
-          if (!sid) return complete({ handled: true, error: "No active session to name" });
-          if (!args) return complete({ handled: true, error: "Usage: /name <name>" });
+          if (!sid) return complete({ handled: true, error: tRef.current("notice.noActiveSessionName") });
+          if (!args) return complete({ handled: true, error: tRef.current("notice.nameUsage") });
           await sendAgentCommand(sid, { type: "set_session_name", name: args });
           if (await loadSession(sid)) promoteNewSession();
-          return complete({ handled: true, message: `Session renamed to ${args}` });
+          return complete({ handled: true, message: tRef.current("notice.sessionRenamed", { name: args }) });
         }
 
         case "session": {
-          if (!sid) return complete({ handled: true, error: "No active session" });
+          if (!sid) return complete({ handled: true, error: tRef.current("notice.noActiveSession") });
           const stats = await sendAgentCommand<SessionStatsInfo>(sid, { type: "get_session_stats" });
           if (stats) {
             setSessionStatsOverride(stats);
@@ -1339,12 +1350,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         }
 
         case "copy": {
-          if (!sid) return complete({ handled: true, error: "No active session" });
+          if (!sid) return complete({ handled: true, error: tRef.current("notice.noActiveSession") });
           const data = await sendAgentCommand<LastAssistantTextResponse>(sid, { type: "get_last_assistant_text" });
           const textToCopy = data?.text ?? "";
-          if (!textToCopy) return complete({ handled: true, error: "No assistant message to copy" });
+          if (!textToCopy) return complete({ handled: true, error: tRef.current("notice.noAssistantMessage") });
           await navigator.clipboard.writeText(textToCopy);
-          return complete({ handled: true, message: "Copied last assistant message" });
+          return complete({ handled: true, message: tRef.current("notice.copiedLastAssistant") });
         }
 
         default:
@@ -1435,7 +1446,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       }
     } catch (e) {
       console.error("Failed to recall queued messages:", e);
-      addNotice({ type: "error", message: "Failed to recall queued messages" });
+      addNotice({ type: "error", message: tRef.current("notice.recallQueueFailed") });
     }
   }, [opts.chatInputRef, addNotice]);
 

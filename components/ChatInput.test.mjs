@@ -13,18 +13,31 @@ const { PixI18nProvider } = await jiti.import("@/lib/i18n");
 
 test("renders the upstream model error", () => {
   const html = renderToStaticMarkup(
-    React.createElement(ModelErrorBanner, {
-      error: "Invalid models.json schema:\nproviders.custom.models.0.id must not be empty",
-    }),
+    React.createElement(
+      PixI18nProvider,
+      null,
+      React.createElement(ModelErrorBanner, {
+        error: "Invalid models.json schema:\nproviders.custom.models.0.id must not be empty",
+      }),
+    ),
   );
 
   assert.match(html, /role="alert"/);
-  assert.match(html, /Model error/);
+  assert.match(html, /模型错误/);
   assert.match(html, /providers\.custom\.models\.0\.id must not be empty/);
 });
 
 test("does not render an empty model error", () => {
-  assert.equal(renderToStaticMarkup(React.createElement(ModelErrorBanner, { error: null })), "");
+  assert.equal(
+    renderToStaticMarkup(
+      React.createElement(
+        PixI18nProvider,
+        null,
+        React.createElement(ModelErrorBanner, { error: null }),
+      ),
+    ),
+    "",
+  );
 });
 
 test("keeps the model selector visible when a model error leaves no options", () => {
@@ -44,6 +57,6 @@ test("keeps the model selector visible when a model error leaves no options", ()
     ),
   );
 
-  assert.match(html, />No models</);
-  assert.match(html, /title="No available models"/);
+  assert.match(html, />没有模型</);
+  assert.match(html, /title="没有可用模型"/);
 });

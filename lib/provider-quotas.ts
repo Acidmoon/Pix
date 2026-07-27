@@ -391,6 +391,19 @@ const ADAPTERS: ProviderQuotaAdapter[] = [
   kimiAdapter,
 ];
 
+/**
+ * 各 summary id 对应的 pi provider id 列表（用于前端把 modelList 里的
+ * provider 关联到厂商账户）。始终包含 summary id 本身。
+ */
+export function getProviderKeyMapping(): Record<string, string[]> {
+  const mapping: Record<string, string[]> = {};
+  for (const adapter of ADAPTERS) {
+    const config = adapter.config();
+    mapping[config.id] = [...new Set([config.id, ...config.keyProviders])];
+  }
+  return mapping;
+}
+
 /** Query only official provider endpoints; raw credentials never leave the server. */
 export async function getProviderAccountSummaries(): Promise<ProviderAccountSummary[]> {
   const cached = globalThis.__piProviderQuotaCache;
