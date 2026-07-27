@@ -1,6 +1,6 @@
 # Pix
 
-[中文文档](./README.zh-CN.md)
+[中文文档](./README.zh-CN.md) | [日本語](./README.ja.md)
 
 Pix is a Windows desktop companion for the [pi coding agent](https://github.com/badlogic/pi-mono). It bundles two parts:
 
@@ -42,7 +42,7 @@ Sources: [Hugging Face](https://huggingface.co/csukuangfj/sherpa-onnx-sense-voic
 ## Requirements
 
 - Windows 10/11
-- [Node.js](https://nodejs.org/) available on `PATH`
+- [Node.js](https://nodejs.org/) 22.19.0 or newer, available on `PATH`
 - [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download) (only for the launcher; building from source needs the .NET 8 SDK instead)
 
 ## Getting started
@@ -58,7 +58,44 @@ npm install -g @agegr/pi-web
 pi-web
 ```
 
-Then open [http://localhost:30141](http://localhost:30141).
+Then open [http://127.0.0.1:30141](http://127.0.0.1:30141). The CLI will try to open the browser automatically after the server is ready. Pi Web listens on `127.0.0.1` by default.
+
+**Options:**
+
+```bash
+pi-web --port 8080              # custom port
+pi-web --hostname 0.0.0.0       # expose on a trusted network
+pi-web -p 8080 -H 0.0.0.0       # combine options
+pi-web --no-open                # do not open the browser automatically
+
+PORT=8080 pi-web                # environment variable is also supported
+PI_WEB_HOSTNAME=0.0.0.0 pi-web  # explicit network exposure
+PI_WEB_NO_OPEN=1 pi-web         # useful when running as a background service
+```
+
+Pi Web has no application-level authentication and can invoke a high-privilege agent. Do not expose it to the internet; only use non-loopback bindings on a trusted network.
+
+#### HTTP Proxy
+
+Pi Web reads the standard `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` environment variables for server-side model and API requests.
+
+On macOS or Linux:
+
+```bash
+HTTP_PROXY=http://127.0.0.1:7890 \
+HTTPS_PROXY=http://127.0.0.1:7890 \
+NO_PROXY=localhost,127.0.0.1 \
+npx @agegr/pi-web@latest
+```
+
+On Windows PowerShell:
+
+```powershell
+$env:HTTP_PROXY = "http://127.0.0.1:7890"
+$env:HTTPS_PROXY = "http://127.0.0.1:7890"
+$env:NO_PROXY = "localhost,127.0.0.1"
+npx @agegr/pi-web@latest
+```
 
 ### Option B: build Pix (pi-web + launcher) from source
 

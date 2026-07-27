@@ -1,6 +1,6 @@
 # Pix
 
-[English](./README.md)
+[English](./README.md) | [日本語](./README.ja.md)
 
 Pix 是 [pi 编程智能体](https://github.com/badlogic/pi-mono) 的 Windows 桌面伴侣，包含两个部分：
 
@@ -42,7 +42,7 @@ Pix 内置端侧语音转文字（[SenseVoice](https://huggingface.co/csukuangfj
 ## 运行环境
 
 - Windows 10/11
-- `PATH` 上可用的 [Node.js](https://nodejs.org/)
+- `PATH` 上可用的 [Node.js](https://nodejs.org/) 22.19.0 或更高版本
 - [.NET 8 桌面运行时](https://dotnet.microsoft.com/download)（仅启动器需要；从源码构建则需要 .NET 8 SDK）
 
 ## 开始使用
@@ -58,7 +58,44 @@ npm install -g @agegr/pi-web
 pi-web
 ```
 
-然后打开 [http://localhost:30141](http://localhost:30141)。
+启动后打开 [http://127.0.0.1:30141](http://127.0.0.1:30141)。命令行版本会在服务就绪后尝试自动打开浏览器。Pi Web 默认仅监听 `127.0.0.1`。
+
+**可选参数：**
+
+```bash
+pi-web --port 8080              # 自定义端口
+pi-web --hostname 0.0.0.0       # 在可信网络中开放访问
+pi-web -p 8080 -H 0.0.0.0       # 组合使用
+pi-web --no-open                # 不自动打开浏览器
+
+PORT=8080 pi-web                # 也支持环境变量
+PI_WEB_HOSTNAME=0.0.0.0 pi-web  # 显式开放网络访问
+PI_WEB_NO_OPEN=1 pi-web         # 适用于后台服务或开机自启
+```
+
+Pi Web 没有应用层身份验证，并且可以调用高权限智能体。请勿将其暴露到互联网；仅在可信网络中使用非 loopback 监听地址。
+
+#### HTTP 代理
+
+Pi Web 的服务端模型请求和 API 请求会读取标准的 `HTTP_PROXY`、`HTTPS_PROXY` 和 `NO_PROXY` 环境变量。
+
+macOS 或 Linux：
+
+```bash
+HTTP_PROXY=http://127.0.0.1:7890 \
+HTTPS_PROXY=http://127.0.0.1:7890 \
+NO_PROXY=localhost,127.0.0.1 \
+npx @agegr/pi-web@latest
+```
+
+Windows PowerShell：
+
+```powershell
+$env:HTTP_PROXY = "http://127.0.0.1:7890"
+$env:HTTPS_PROXY = "http://127.0.0.1:7890"
+$env:NO_PROXY = "localhost,127.0.0.1"
+npx @agegr/pi-web@latest
+```
 
 ### 方式 B：从源码构建 Pix（pi-web + 启动器）
 
