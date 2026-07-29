@@ -34,6 +34,17 @@ if (!sourceDir) {
 const webRoot = process.cwd();
 const SWAP_ENTRIES = ["bin", ".next", "public", "next.config.ts", "package.json"];
 
+// 自我保护：swap bin/ 时本脚本可能把自己删掉（例如某个发布包漏打了 bin/apply-update.js，
+// 0.8.2 就发生过）。启动器回滚时还要再次调用本脚本，所以在换文件前把自身源码读进内存，
+// 换完后若已丢失则写回。
+const selfPath = path.join(webRoot, "bin", "apply-update.js");
+let selfSource = null;
+try {
+  selfSource = fs.readFileSync(selfPath);
+} catch {
+  // 读不到就算了——理论上启动器刚用它启动了我们
+}
+
 function log(message) {
   console.log(`[apply-update] ${message}`);
 }
@@ -71,6 +82,11 @@ try {
     log(`replace: ${entry}`);
     fs.rmSync(dest, { recursive: true, force: true });
     fs.cpSync(src, dest, { recursive: true });
+  }
+
+  if (selfSource && !fs.existsSync(selfPath)) {
+    log("restore self: bin/apply-update.js (missing in source)");
+    fs.writeFileSync(selfPath, selfSource);
   }
 
   log("syncing dependencies (npm install --omit=dev)…");

@@ -246,7 +246,8 @@ internal sealed class PiWebProcessManager : IDisposable
 
     private async Task WaitUntilHealthyAsync(CancellationToken cancellationToken)
     {
-        var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
+        // 冷启动（开机首次、杀软扫描新换入的 .next）可能远超 30 秒，给足 120 秒。
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(120);
         while (DateTimeOffset.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -259,7 +260,7 @@ internal sealed class PiWebProcessManager : IDisposable
             await Task.Delay(250, cancellationToken);
         }
 
-        throw CreateStartupException("Pi Web did not become healthy within 30 seconds.");
+        throw CreateStartupException("Pi Web did not become healthy within 120 seconds.");
     }
 
     private InvalidOperationException CreateStartupException(string reason)

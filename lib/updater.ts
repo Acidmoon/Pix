@@ -2,7 +2,7 @@ import { execFile, spawn } from "child_process";
 import { copyFile, cp, mkdir, mkdtemp, readdir, rm } from "fs/promises";
 import { existsSync } from "fs";
 import { tmpdir } from "os";
-import { dirname, join } from "path";
+import { dirname, join, sep } from "path";
 import { execPath } from "process";
 import { promisify } from "util";
 import { getAppCurrentVersion, getKernelCurrentVersion, getLatestVersion, APP_PACKAGE, KERNEL_PACKAGES } from "./update-check";
@@ -205,6 +205,17 @@ async function backupAppFiles(webRoot: string, backupDir: string): Promise<void>
   for (const entry of APP_SWAP_ENTRIES) {
     const src = join(webRoot, entry);
     if (!existsSync(src)) continue;
+    if (entry === ".next") {
+      // .next/dev 是 Turbopack 开发缓存，内含指向 node_modules 的符号链接。
+      // Windows 上重建符号链接需要管理员/开发者模式权限（EPERM），
+      // 且该缓存对回滚毫无价值（不在 npm 包 files 里），直接跳过。
+      const devCache = join(src, "dev");
+      await cp(src, join(backupDir, entry), {
+        recursive: true,
+        filter: (source) => source !== devCache && !source.startsWith(devCache + sep),
+      });
+      continue;
+    }
     await cp(src, join(backupDir, entry), { recursive: true });
   }
 }
