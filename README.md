@@ -116,20 +116,21 @@ npx @agegr/pi-web@latest
 npm install
 npm run build
 
-# 2. Build the launcher
-dotnet build .\launcher\PixLauncher.csproj -c Release
+# 2. Assemble PixApp with the launcher, web build, and production dependencies
+.\launcher\publish.ps1
 
-# 3. Run it — it finds bin\pi-web.js by walking upward from its location
-.\launcher\bin\Release\net8.0-windows\PixLauncher.exe
+# 3. Run the co-located distribution
+.\dist\PixApp\PixLauncher.exe
 ```
 
-If the launcher sits outside the repository, point it at the pi-web directory:
+Only when debugging a standalone launcher that was not assembled by
+`publish.ps1`, point it at the pi-web directory:
 
 ```powershell
 $env:PI_WEB_ROOT = "E:\Pix"
 ```
 
-Prebuilt launcher archives are attached to [GitHub Releases](https://github.com/Acidmoon/Pix/releases). They contain only the launcher — you still need a pi-web build (`npm run build`) for it to drive.
+A production distribution must contain the launcher, `.next`, `bin`, `public`, and production dependencies. A web runtime beside the launcher takes precedence over `PI_WEB_ROOT`, preventing an installed PixApp from accidentally using a development checkout.
 
 ## How it fits together
 
@@ -142,7 +143,7 @@ PixLauncher.exe (WinForms, control plane)
    ▼
 node bin/pi-web.js (Next.js service)
    ▼
-Edge/Chrome --app window (user's existing Default profile)
+Edge/Chrome --app window (persistent Pix-only profile owned by the launcher)
 ```
 
 - The two processes share no code; the launcher only talks HTTP to pi-web.

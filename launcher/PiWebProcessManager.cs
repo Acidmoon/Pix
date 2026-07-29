@@ -307,23 +307,34 @@ internal sealed class PiWebProcessManager : IDisposable
 
     private static string FindWebRoot()
     {
+        // A packaged launcher must use the web runtime shipped beside it. A
+        // stale user-level PI_WEB_ROOT must not redirect production PixApp back
+        // to a mutable development checkout.
+        var assemblyDirectory = Path.GetDirectoryName(typeof(PiWebProcessManager).Assembly.Location);
+        var packagedRoot = FindWebRootFrom(assemblyDirectory ?? AppContext.BaseDirectory);
+        if (packagedRoot is not null) return packagedRoot;
+
         var configuredRoot = Environment.GetEnvironmentVariable("PI_WEB_ROOT");
         if (!string.IsNullOrWhiteSpace(configuredRoot) && IsWebRoot(configuredRoot))
         {
             return Path.GetFullPath(configuredRoot);
         }
 
-        foreach (var startingPoint in new[] { AppContext.BaseDirectory, Environment.CurrentDirectory })
-        {
-            var directory = new DirectoryInfo(startingPoint);
-            while (directory is not null)
-            {
-                if (IsWebRoot(directory.FullName)) return directory.FullName;
-                directory = directory.Parent;
-            }
-        }
+        var currentDirectoryRoot = FindWebRootFrom(Environment.CurrentDirectory);
+        if (currentDirectoryRoot is not null) return currentDirectoryRoot;
 
-        throw new InvalidOperationException("Pi Web installation was not found. Set PI_WEB_ROOT to its directory.");
+        throw new InvalidOperationException("Pi Web installation was not found. Publish PixApp or set PI_WEB_ROOT to a built Pi Web directory.");
+    }
+
+    private static string? FindWebRootFrom(string startingPoint)
+    {
+        var directory = new DirectoryInfo(startingPoint);
+        while (directory is not null)
+        {
+            if (IsWebRoot(directory.FullName)) return directory.FullName;
+            directory = directory.Parent;
+        }
+        return null;
     }
 
     private static bool IsWebRoot(string path) =>

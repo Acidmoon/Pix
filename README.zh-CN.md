@@ -106,20 +106,20 @@ npx @agegr/pi-web@latest
 npm install
 npm run build
 
-# 2. 构建启动器
-dotnet build .\launcher\PixLauncher.csproj -c Release
+# 2. 组装包含启动器、Web 构建和生产依赖的 PixApp 目录
+.\launcher\publish.ps1
 
-# 3. 运行——它会从自身位置向上查找 bin\pi-web.js
-.\launcher\bin\Release\net8.0-windows\PixLauncher.exe
+# 3. 运行同目录发布包
+.\dist\PixApp\PixLauncher.exe
 ```
 
-如果启动器放在仓库之外的目录，用环境变量指向 pi-web 目录：
+仅在调试未通过 `publish.ps1` 组装的独立启动器时，才用环境变量指向 pi-web 目录：
 
 ```powershell
 $env:PI_WEB_ROOT = "E:\Pix"
 ```
 
-[GitHub Releases](https://github.com/Acidmoon/Pix/releases) 附有打包好的启动器压缩包——里面只有启动器本身，仍需要一份 `npm run build` 出来的 pi-web 供它驱动。
+正式发布目录必须同时包含启动器、`.next`、`bin`、`public` 和生产依赖；与启动器同目录的 Web 运行时优先于 `PI_WEB_ROOT`，避免安装版误用开发仓库。
 
 ## 架构关系
 
@@ -132,7 +132,7 @@ PixLauncher.exe（WinForms，控制平面）
    ▼
 node bin/pi-web.js（Next.js 服务）
    ▼
-Edge/Chrome --app 窗口（复用用户现有 Default profile）
+Edge/Chrome --app 窗口（Pix 专用持久 profile，由启动器管理）
 ```
 
 - 两个进程不共享任何代码，启动器只通过 HTTP 与 pi-web 通信。

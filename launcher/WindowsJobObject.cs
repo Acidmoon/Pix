@@ -16,7 +16,9 @@ internal sealed class WindowsJobObject : IDisposable
     private const uint CreateSuspended = 0x00000004;
     private const uint CreateUnicodeEnvironment = 0x00000400;
     private const uint JobObjectLimitKillOnJobClose = 0x00002000;
+    private const int BasicProcessIdListClass = 3;
     private const int ExtendedLimitInformationClass = 9;
+    private const int ErrorMoreData = 234;
 
     private IntPtr handle;
 
@@ -106,6 +108,50 @@ internal sealed class WindowsJobObject : IDisposable
     public void Terminate(uint exitCode = 1)
     {
         if (handle != IntPtr.Zero) TerminateJobObject(handle, exitCode);
+    }
+
+    /// <summary>
+    /// Return every process currently assigned to the job. Chromium can let its
+    /// original launch process exit after creating the real browser process, so
+    /// callers must inspect the job instead of trusting the initial PID.
+    /// </summary>
+    public IReadOnlyList<int> GetProcessIds()
+    {
+        if (handle == IntPtr.Zero) return Array.Empty<int>();
+
+        var capacity = 16;
+        while (true)
+        {
+            // JOBOBJECT_BASIC_PROCESS_ID_LIST contains two DWORD counters
+            // followed by a variable-length ULONG_PTR array.
+            var size = checked(8 + capacity * IntPtr.Size);
+            var pointer = Marshal.AllocHGlobal(size);
+            try
+            {
+                if (QueryInformationJobObject(handle, BasicProcessIdListClass, pointer, (uint)size, out _))
+                {
+                    var count = Marshal.ReadInt32(pointer, 4);
+                    var result = new int[count];
+                    for (var index = 0; index < count; index++)
+                    {
+                        var offset = 8 + index * IntPtr.Size;
+                        result[index] = IntPtr.Size == 8
+                            ? checked((int)Marshal.ReadInt64(pointer, offset))
+                            : Marshal.ReadInt32(pointer, offset);
+                    }
+                    return result;
+                }
+
+                var error = Marshal.GetLastWin32Error();
+                if (error != ErrorMoreData) throw new Win32Exception(error);
+                var assignedCount = Marshal.ReadInt32(pointer, 0);
+                capacity = Math.Max(capacity * 2, assignedCount);
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(pointer);
+            }
+        }
     }
 
     public void Dispose()
@@ -217,6 +263,14 @@ internal sealed class WindowsJobObject : IDisposable
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool TerminateJobObject(IntPtr job, uint exitCode);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool QueryInformationJobObject(
+        IntPtr job,
+        int infoClass,
+        IntPtr info,
+        uint length,
+        out uint returnLength);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern bool CreateProcess(

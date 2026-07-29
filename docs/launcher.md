@@ -16,16 +16,15 @@ those remain in the browser UI.
 - Expand on click into a start view or a running-service control panel.
 - Show the service PID, port, active AgentSession count, provider balances, and
   subscription quota remaining.
-- Open Pi Web in an Edge or Chrome `--app` window that uses the browser's
-  existing `Default` profile, retaining extensions, sign-in state, settings,
-  and site permissions without creating a Pix-specific browser profile.
+- Open Pi Web in an Edge or Chrome `--app` window backed by a persistent,
+  Pix-specific browser profile under `%LOCALAPPDATA%\Pix\BrowserProfile`.
 - Request authenticated AgentSession cleanup before stopping the service.
-- Place the service in a Windows Job Object so its process tree is terminated
-  if graceful shutdown times out or the launcher exits. The browser remains
-  independent because it belongs to the user's existing profile.
+- Place both the service and the dedicated browser in Windows Job Objects so
+  their process trees are terminated if graceful shutdown times out or the
+  launcher exits. This prevents stale app windows from retaining dead ports.
 - Auto-restart the service after an in-place update: consume the web service's
-  restart marker (`logs/pix-restart.json`), start a fresh process on a new port,
-  and open the replacement URL in an Edge or Chrome `--app` window — no manual
+  restart marker (`logs/pix-restart.json`), close the old owned browser window,
+  start a fresh process on a new port, and open the replacement URL — no manual
   restart needed.
 
 The shutdown endpoint exists only when the launcher supplies a random
@@ -56,7 +55,7 @@ For a whole-app update the marker carries an `appUpdate` payload. Before
 restarting, the launcher runs `node bin/apply-update.js <stagedDir>` to swap the
 new `bin/.next/public/next.config.ts/package.json` into the web root (keeping
 `node_modules`, `logs`, `.env`) and sync dependencies. If the new build fails the
-30s health check, the launcher restores the backup directory once
+120s health check, the launcher restores the backup directory once
 (`apply-update.js <backupDir> --no-cleanup`) and retries the restart.
 
 The running panel currently includes two official provider adapters:
@@ -87,18 +86,23 @@ $env:HOMEDRIVE = Split-Path -Qualifier $buildHome
 $env:HOMEPATH = $buildHome.Substring(2)
 npm run build
 
-# Build and run the Windows launcher.
+# Build and run the Windows launcher from the repository.
 dotnet build .\launcher\PixLauncher.csproj
 dotnet run --project .\launcher\PixLauncher.csproj
+
+# Assemble a distributable directory containing the launcher and web runtime.
+.\launcher\publish.ps1
+.\dist\PixApp\PixLauncher.exe
 ```
 
-By default, the launcher walks upward from its executable and current working
-directory to find `bin/pi-web.js`. Set `PI_WEB_ROOT` when the launcher binary is
-stored elsewhere.
+The launcher first walks upward from its executable to find a packaged
+`bin/pi-web.js`; this co-located runtime takes precedence over `PI_WEB_ROOT`.
+The environment variable remains a development fallback for a standalone
+launcher that was not produced by `publish.ps1`.
 
-Node.js must currently be installed and available on `PATH`. Packaging a fixed
-Node runtime and the Pi Web build into one installer is intentionally deferred
-to the distribution phase.
+Node.js must currently be installed and available on `PATH`. `publish.ps1`
+packages the built Pi Web runtime and installs production npm dependencies, but
+does not redistribute Node.js itself.
 
 Any future launcher configuration view must continue to use Pi's
 `models.json`, `settings.json`, and `AuthStorage` through Pi Web APIs. The
