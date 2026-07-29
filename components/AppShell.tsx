@@ -13,14 +13,17 @@ import { PluginsConfig } from "./PluginsConfig";
 import { UpdateConfig } from "./UpdateConfig";
 import { SettingsModal } from "./SettingsModal";
 import { useT } from "@/lib/i18n";
+import { ProjectTrustDialog } from "./ProjectTrustDialog";
 import { BranchNavigator } from "./BranchNavigator";
 import { useTheme } from "@/hooks/useTheme";
+import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { copyText } from "@/lib/clipboard";
 import { getFileName } from "@/lib/file-paths";
 import { buildAtMentionText, buildFileAtMentionsText, buildFileLineMentionText } from "@/lib/file-fuzzy";
 import { getInitialNavigation } from "@/lib/initial-navigation";
 import type { SessionInfo, SessionTreeNode } from "@/lib/types";
+import type { ProjectTrustStatus } from "@/lib/api-types";
 import type { ChatInputHandle } from "./ChatInput";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 
@@ -31,11 +34,15 @@ type AutoNameStatus =
   | { kind: "success" }
   | { kind: "error"; message: string };
 
+const TOP_BAR_ICON_BUTTON_SIZE = 36;
+const LANGUAGE_MENU_WIDTH = 176;
+
 export function AppShell() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [initialNavigation] = useState(() => getInitialNavigation(searchParams));
   const { isDark, toggleTheme } = useTheme();
+  const { setLocale, t: translate, supportedLocales } = useI18n();
   const isMobile = useIsMobile();
   const [selectedSession, setSelectedSession] = useState<SessionInfo | null>(null);
   // When user clicks +, we only store the cwd — no fake session id
@@ -54,6 +61,10 @@ export function AppShell() {
   const [updateConfigOpen, setUpdateConfigOpen] = useState(false);
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
+  const [projectTrust, setProjectTrust] = useState<ProjectTrustStatus | null>(null);
+  const [projectTrustDialogOpen, setProjectTrustDialogOpen] = useState(false);
+  const [projectTrustBusy, setProjectTrustBusy] = useState(false);
+  const [projectTrustError, setProjectTrustError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileSidebarReady, setMobileSidebarReady] = useState(false);
   // On mobile the sidebar is an overlay drawer; hide it by default so the chat
@@ -84,8 +95,17 @@ export function AppShell() {
   }, []);
   const chatInputRef = useRef<ChatInputHandle | null>(null);
   const topBarRef = useRef<HTMLDivElement>(null);
+  const languageBtnRef = useRef<HTMLButtonElement>(null);
 
-  const { t } = useT();
+  const { t, lang, setLang } = useT();
+  // 上游语言菜单驱动的是上游 i18n（hooks/useI18n），这里把当前语言映射成
+  // 上游 locale id，让菜单高亮与本 fork 的 useT 语言保持一致
+  const activeLocaleId = lang === "zh" ? "zh-CN" : "en";
+  // 本 fork 的 useT 与上游 useI18n 并存：让上游 locale 始终跟随本 fork 语言，
+  // 这样从设置弹窗切换语言时，上游新增的文案（语言菜单、信任提示）也会同步
+  useEffect(() => {
+    setLocale(activeLocaleId as typeof locale);
+  }, [activeLocaleId, setLocale]);
 
   // Branch navigator state — populated by ChatWindow via onBranchDataChange
   const [branchTree, setBranchTree] = useState<SessionTreeNode[]>([]);
@@ -142,10 +162,10 @@ export function AppShell() {
   }, []);
 
   // Single active panel — only one dropdown open at a time
-  const [activeTopPanel, setActiveTopPanel] = useState<"branches" | "system" | "session" | null>(null);
+  const [activeTopPanel, setActiveTopPanel] = useState<"branches" | "system" | "session" | "language" | null>(null);
   const [topPanelPos, setTopPanelPos] = useState<{ top: number; left: number; width: number } | null>(null);
 
-  const toggleTopPanel = useCallback((panel: "branches" | "system" | "session") => {
+  const toggleTopPanel = useCallback((panel: "branches" | "system" | "session" | "language") => {
     if (isMobile) setSidebarOpen(false);
     setActiveTopPanel((cur) => cur === panel ? null : panel);
   }, [isMobile]);
@@ -163,14 +183,25 @@ export function AppShell() {
   useEffect(() => {
     if (!activeTopPanel || !topBarRef.current) return;
     const update = () => {
-      const rect = topBarRef.current!.getBoundingClientRect();
-      setTopPanelPos({ top: rect.bottom, left: rect.left, width: rect.width });
+      const topBarRect = topBarRef.current!.getBoundingClientRect();
+      if (activeTopPanel === "language" && !isMobile && languageBtnRef.current) {
+        const buttonRect = languageBtnRef.current.getBoundingClientRect();
+        const width = Math.min(LANGUAGE_MENU_WIDTH, topBarRect.width);
+        const left = Math.min(
+          buttonRect.left - 1,
+          Math.max(topBarRect.left, topBarRect.right - width),
+        );
+        setTopPanelPos({ top: topBarRect.bottom, left, width });
+        return;
+      }
+      setTopPanelPos({ top: topBarRect.bottom, left: topBarRect.left, width: topBarRect.width });
     };
     update();
     const ro = new ResizeObserver(update);
     ro.observe(topBarRef.current);
+    if (languageBtnRef.current) ro.observe(languageBtnRef.current);
     return () => ro.disconnect();
-  }, [activeTopPanel]);
+  }, [activeTopPanel, isMobile]);
 
   // Right panel — file tabs only
   const [fileTabs, setFileTabs] = useState<Tab[]>([]);
@@ -194,6 +225,7 @@ export function AppShell() {
 
   const initialSessionId = initialNavigation.sessionId;
   const [activeCwd, setActiveCwd] = useState<string | null>(null);
+  const activeProjectRootRef = useRef<string | null>(null);
   // True once the initial ?session= URL param has been resolved (or confirmed absent)
   const [initialSessionRestored, setInitialSessionRestored] = useState<boolean>(() => !initialSessionId);
   // Suppresses sessionKey bump in handleCwdChange during the initial URL restore
@@ -236,8 +268,15 @@ export function AppShell() {
 
   const handleCwdChange = useCallback((cwd: string | null, projectRoot?: string | null) => {
     setActiveCwd(cwd);
-    // Skip if cwd is null (initial mount) or during the initial URL restore.
+    // Skip if cwd is null (initial mount).
     if (!cwd) return;
+    const newProject = projectRoot ?? cwd;
+    const currentProject = activeProjectRootRef.current
+      ?? (selectedSession ? (selectedSession.projectRoot ?? selectedSession.cwd) : null);
+    activeProjectRootRef.current = newProject;
+
+    // Keep the project identity in sync during the initial URL restore without
+    // remounting the just-created or restored chat.
     if (suppressCwdBumpRef.current) {
       suppressCwdBumpRef.current = false;
       return;
@@ -245,8 +284,7 @@ export function AppShell() {
     // Worktrees of one repo share a project root. Moving the effective cwd
     // within the same project (e.g. switching worktree, or clicking a session
     // that lives in another worktree) must not close the open session.
-    const newProject = projectRoot ?? cwd;
-    if (selectedSession && (selectedSession.projectRoot ?? selectedSession.cwd) === newProject) {
+    if (currentProject === newProject) {
       return;
     }
     // Close any session that belongs to a different project — it no longer
@@ -261,6 +299,14 @@ export function AppShell() {
     setBranchActiveLeafId(null);
     setSystemPrompt(null);
     setActiveTopPanel(null);
+    // File tabs are keyed by absolute path, so tabs opened in the previous
+    // project would otherwise linger after switching to a different project.
+    // Reached only past the same-project early return above, so worktrees of
+    // one repo keep their open tabs. Mirror handleCloseFileTab and close the
+    // now-empty right panel.
+    setFileTabs([]);
+    setActiveFileTabId(null);
+    setRightPanelOpen(false);
     router.replace("/", { scroll: false });
   }, [router, selectedSession]);
 
@@ -402,13 +448,35 @@ export function AppShell() {
     }
   }, [selectedSession, router]);
 
-  const handleOpenFile = useCallback((filePath: string, fileName: string, sourceSessionId?: string | null) => {
+  const handleOpenFile = useCallback((
+    filePath: string,
+    fileName: string,
+    options?: { sourceSessionId?: string | null; modeHint?: "diff" },
+  ) => {
+    const sourceSessionId = options?.sourceSessionId;
+    const modeHint = options?.modeHint;
     const tabId = `file:${filePath}`;
     setFileTabs((prev) => {
       const existing = prev.find((t) => t.id === tabId);
-      if (!existing) return [...prev, { id: tabId, label: fileName, filePath, sourceSessionId }];
-      if (!sourceSessionId || existing.sourceSessionId === sourceSessionId) return prev;
-      return prev.map((t) => t.id === tabId ? { ...t, sourceSessionId } : t);
+      if (!existing) {
+        return [...prev, {
+          id: tabId,
+          label: fileName,
+          filePath,
+          sourceSessionId,
+          initialDisplayMode: modeHint,
+        }];
+      }
+      const sourceUnchanged = !sourceSessionId || existing.sourceSessionId === sourceSessionId;
+      const modeUnchanged = !modeHint || existing.initialDisplayMode === modeHint;
+      if (sourceUnchanged && modeUnchanged) return prev;
+      return prev.map((t) => {
+        if (t.id !== tabId) return t;
+        const next: Tab = { ...t };
+        if (sourceSessionId) next.sourceSessionId = sourceSessionId;
+        if (modeHint) next.initialDisplayMode = modeHint;
+        return next;
+      });
     });
     setActiveFileTabId(tabId);
     setRightPanelOpen(true);
@@ -417,7 +485,7 @@ export function AppShell() {
   }, [isMobile]);
 
   const handleOpenLinkedFile = useCallback((filePath: string) => {
-    handleOpenFile(filePath, getFileName(filePath), selectedSession?.id ?? null);
+    handleOpenFile(filePath, getFileName(filePath), { sourceSessionId: selectedSession?.id ?? null });
   }, [handleOpenFile, selectedSession?.id]);
 
   const handleCloseFileTab = useCallback((tabId: string) => {
@@ -445,8 +513,54 @@ export function AppShell() {
   // Show chat area if a session is selected, or if we have a cwd to start a new session in
   const effectiveNewSessionCwd = newSessionCwd ?? (selectedSession === null && activeCwd ? activeCwd : null);
   const showChat = selectedSession !== null || effectiveNewSessionCwd !== null;
+  const projectTrustCwd = selectedSession?.cwd ?? effectiveNewSessionCwd;
   // While restoring initial session from URL, don't show the placeholder
   const showPlaceholder = initialSessionRestored && !showChat;
+
+  useEffect(() => {
+    setProjectTrust(null);
+    setProjectTrustDialogOpen(false);
+    setProjectTrustError(null);
+    if (!projectTrustCwd) return;
+
+    const controller = new AbortController();
+    fetch(`/api/project-trust?cwd=${encodeURIComponent(projectTrustCwd)}`, {
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const data = await response.json() as ProjectTrustStatus & { error?: string };
+        if (!response.ok || data.error) throw new Error(data.error ?? `HTTP ${response.status}`);
+        setProjectTrust(data);
+      })
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        console.error("Failed to load project trust:", error);
+      });
+    return () => controller.abort();
+  }, [projectTrustCwd]);
+
+  const handleTrustProject = useCallback(async () => {
+    if (!projectTrustCwd || projectTrustBusy) return;
+    setProjectTrustBusy(true);
+    setProjectTrustError(null);
+    try {
+      const response = await fetch("/api/project-trust", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cwd: projectTrustCwd }),
+      });
+      const data = await response.json() as ProjectTrustStatus & { error?: string };
+      if (!response.ok || data.error) throw new Error(data.error ?? `HTTP ${response.status}`);
+      setProjectTrust(data);
+      setProjectTrustDialogOpen(false);
+      setModelsRefreshKey((key) => key + 1);
+      setSessionKey((key) => key + 1);
+    } catch (error) {
+      setProjectTrustError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setProjectTrustBusy(false);
+    }
+  }, [projectTrustBusy, projectTrustCwd]);
 
   const activeFileTab = fileTabs.find((t) => t.id === activeFileTabId) ?? null;
   const activeCwdName = activeCwd ? getFileName(activeCwd) || activeCwd : null;
@@ -642,7 +756,7 @@ export function AppShell() {
             aria-label={sidebarOpen ? t("shell.hideSidebar") : t("shell.showSidebar")}
             style={{
               display: "flex", alignItems: "center", justifyContent: "center",
-              width: 36, height: 36, padding: 0,
+              width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0,
               background: "none", border: "none", borderRight: "1px solid var(--border)",
               color: "var(--text-muted)", cursor: "pointer", flexShrink: 0, transition: "color 0.12s",
             }}
@@ -669,7 +783,7 @@ export function AppShell() {
             aria-pressed={isDark}
             style={{
               display: "flex", alignItems: "center", justifyContent: "center",
-              width: 36, height: 36, padding: 0,
+              width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0,
               background: "none", border: "none", borderRight: "1px solid var(--border)",
               color: "var(--text-muted)", cursor: "pointer", flexShrink: 0, transition: "color 0.12s",
             }}
@@ -689,7 +803,91 @@ export function AppShell() {
                 <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
               </svg>
             )}
-          </button>
+           </button>
+           <button
+             ref={languageBtnRef}
+             type="button"
+             onClick={() => toggleTopPanel("language")}
+             title={translate("common.language")}
+             aria-label={translate("common.language")}
+             aria-haspopup="menu"
+             aria-expanded={activeTopPanel === "language"}
+             aria-pressed={activeTopPanel === "language"}
+             style={{
+               display: "flex", alignItems: "center", justifyContent: "center",
+               width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0,
+               background: activeTopPanel === "language" ? "var(--bg-selected)" : "none",
+               border: "none", borderRight: "1px solid var(--border)",
+               color: activeTopPanel === "language" ? "var(--text)" : "var(--text-muted)",
+               cursor: "pointer", flexShrink: 0, transition: "color 0.12s",
+             }}
+             onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
+             onMouseLeave={(e) => {
+               e.currentTarget.style.color = activeTopPanel === "language" ? "var(--text)" : "var(--text-muted)";
+             }}
+           >
+             <svg
+               width="16"
+               height="16"
+               viewBox="0 0 24 24"
+               fill="none"
+               stroke="currentColor"
+               strokeWidth="1.8"
+               strokeLinecap="round"
+               strokeLinejoin="round"
+               aria-hidden="true"
+             >
+               <path d="m5 8 6 6" />
+               <path d="m4 14 6-6 2-3" />
+               <path d="M2 5h12" />
+               <path d="M7 2h1" />
+               <path d="m22 22-5-10-5 10" />
+               <path d="M14 18h6" />
+             </svg>
+           </button>
+          {showChat && projectTrust?.requiresTrust && !projectTrust.trusted && (
+            <button
+              type="button"
+              onClick={() => {
+                setProjectTrustError(null);
+                setProjectTrustDialogOpen(true);
+              }}
+              title={translate("trust.resourcesNotLoaded")}
+              aria-label={translate("trust.resourcesNotLoaded")}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                height: "100%",
+                padding: isMobile ? "0 10px" : "0 12px",
+                background: "none",
+                border: "none",
+                borderRight: "1px solid var(--border)",
+                color: "#d97706",
+                cursor: "pointer",
+                flexShrink: 0,
+                fontSize: 11,
+                whiteSpace: "nowrap",
+              }}
+            >
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
+                <path d="M12 8v4" />
+                <path d="M12 16h.01" />
+              </svg>
+              {!isMobile && <span>{translate("trust.resourcesNotLoaded")}</span>}
+            </button>
+          )}
           {showChat && (
             <div style={{ display: "flex", alignItems: "stretch", height: "100%" }}>
               <button
@@ -971,6 +1169,51 @@ export function AppShell() {
               overflowY: "auto",
               zIndex: 500,
             }}>
+              {activeTopPanel === "language" && (
+                <div
+                  role="menu"
+                  aria-label={translate("common.language")}
+                  style={{
+                    background: "var(--bg-panel)",
+                    borderLeft: "1px solid var(--border)",
+                    borderRight: "1px solid var(--border)",
+                    borderBottom: "1px solid var(--border)",
+                    overflow: "hidden",
+                    padding: 4,
+                  }}
+                >
+                  {supportedLocales.map((plugin) => (
+                    <button
+                      key={plugin.id}
+                      type="button"
+                      onClick={() => {
+                        setLocale(plugin.id as typeof locale);
+                        // 同步切换本 fork 的 useT 语言（zh-CN ↔ zh）
+                        setLang(plugin.id === "zh-CN" ? "zh" : "en");
+                        setActiveTopPanel(null);
+                      }}
+                      role="menuitemradio"
+                      aria-checked={activeLocaleId === plugin.id}
+                      style={{
+                        display: "flex", alignItems: "center",
+                        width: "100%", height: 34, padding: "0 10px",
+                        border: "none", borderRadius: 4,
+                        background: activeLocaleId === plugin.id ? "var(--bg-selected)" : "transparent",
+                        color: "var(--text)", cursor: "pointer", textAlign: "left", fontSize: 12,
+                        transition: "background 0.1s",
+                      }}
+                      onMouseEnter={(e) => {
+                        if (activeLocaleId !== plugin.id) e.currentTarget.style.background = "var(--bg-hover)";
+                      }}
+                      onMouseLeave={(e) => {
+                        if (activeLocaleId !== plugin.id) e.currentTarget.style.background = "transparent";
+                      }}
+                    >
+                      <span>{plugin.label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
               {activeTopPanel === "system" && (
                 <div style={{
                   background: "var(--bg-panel)",
@@ -1253,11 +1496,12 @@ export function AppShell() {
               cwd={activeCwd ?? undefined}
               sourceSessionId={activeFileTab.sourceSessionId}
               gitRefreshKey={explorerRefreshKey}
+              initialDisplayMode={activeFileTab.initialDisplayMode}
               onMentionLines={rightPanelOpen ? handleFileLineMention : undefined}
               onOpenFile={(filePath) => handleOpenFile(
                 filePath,
                 getFileName(filePath),
-                activeFileTab.sourceSessionId,
+                { sourceSessionId: activeFileTab.sourceSessionId },
               )}
             />
           ) : (
@@ -1289,12 +1533,23 @@ export function AppShell() {
       </svg>
     </button>
     {modelsConfigOpen && <ModelsConfig onClose={() => { setModelsConfigOpen(false); setModelsRefreshKey((k) => k + 1); }} />}
-    {skillsConfigOpen && (activeCwd ?? selectedSession?.cwd ?? newSessionCwd) && (
-      <SkillsConfig cwd={(activeCwd ?? selectedSession?.cwd ?? newSessionCwd)!} onClose={() => setSkillsConfigOpen(false)} />
+    {projectTrustDialogOpen && projectTrustCwd && (
+      <ProjectTrustDialog
+        cwd={projectTrustCwd}
+        busy={projectTrustBusy}
+        error={projectTrustError}
+        onCancel={() => {
+          if (!projectTrustBusy) setProjectTrustDialogOpen(false);
+        }}
+        onConfirm={() => void handleTrustProject()}
+      />
     )}
-    {pluginsConfigOpen && (activeCwd ?? selectedSession?.cwd ?? newSessionCwd) && (
+    {skillsConfigOpen && projectTrustCwd && (
+      <SkillsConfig cwd={projectTrustCwd} onClose={() => setSkillsConfigOpen(false)} />
+    )}
+    {pluginsConfigOpen && projectTrustCwd && (
       <PluginsConfig
-        cwd={(activeCwd ?? selectedSession?.cwd ?? newSessionCwd)!}
+        cwd={projectTrustCwd}
         sessionId={selectedSession?.id ?? null}
         onClose={() => setPluginsConfigOpen(false)}
         onReloaded={() => setSessionKey((k) => k + 1)}

@@ -75,7 +75,11 @@ const exitDiagOpts = `--require ${exitDiagPath}`;
 const child = spawn(process.execPath, [nextBin, ...nextArgs], {
   cwd: pkgDir,
   stdio: ["ignore", "pipe", "pipe"],
-  env: { ...process.env, NODE_OPTIONS: [process.env.NODE_OPTIONS, exitDiagOpts].filter(Boolean).join(" ") },
+  env: {
+    ...process.env,
+    PI_WEB_HOSTNAME: hostname,
+    NODE_OPTIONS: [process.env.NODE_OPTIONS, exitDiagOpts].filter(Boolean).join(" "),
+  },
 });
 
 writeServiceLog(`Starting ${process.execPath} ${nextBin} ${nextArgs.join(" ")}`);

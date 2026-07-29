@@ -65,6 +65,8 @@ app/api/
   launcher/shutdown/route.ts      POST graceful stop (Bearer PI_WEB_LAUNCHER_TOKEN)
   models/route.ts                 GET { models, modelList, defaultModel }
   models-config/route.ts          GET/PUT — read/write ~/.pi/agent/models.json
+  models-config/catalog/route.ts  GET models.dev pricing presets
+  models-config/discover/route.ts POST fetch a configured provider's upstream model list
   models-config/test/route.ts     POST test a configured model/provider
   plugins/route.ts                GET/POST package plugin management
   quotas/route.ts                 GET browser-side provider balances/quota windows (loopback, no launcher token)

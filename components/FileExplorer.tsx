@@ -5,6 +5,7 @@ import { getFileIcon, FolderIcon } from "./FileIcons";
 import {
   encodeFilePathForApi,
   getFileDirectory,
+  getFileName,
   getRelativeFilePath,
   joinFilePath,
   normalizeFilePathSlashes,
@@ -32,11 +33,13 @@ interface FileNode {
 
 interface Props {
   cwd: string;
-  onOpenFile: (filePath: string, fileName: string) => void;
+  onOpenFile: (filePath: string, fileName: string, options?: OpenFileOptions) => void;
   refreshKey?: number;
   onAtMention?: (relativePath: string, isDir: boolean) => void;
   onAtMentions?: (relativePaths: string[]) => void;
   onUploadBusyChange?: (busy: boolean) => void;
+  changesCollapsed: boolean;
+  onChangesCountChange?: (count: number) => void;
 }
 
 export interface FileExplorerHandle {
@@ -121,6 +124,29 @@ const GIT_STATUS_COLORS: Record<GitFileStatusKind, string> = {
   conflict: "#f87171",
 };
 
+function GitStatusBadge({ status, t }: { status: GitFileStatus; t: Translate }) {
+  return (
+    <span
+      title={t(GIT_STATUS_LABEL_KEYS[status.status])}
+      aria-label={t(GIT_STATUS_LABEL_KEYS[status.status])}
+      style={{
+        width: 14,
+        height: 14,
+        flexShrink: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        color: GIT_STATUS_COLORS[status.status],
+        fontFamily: "var(--font-mono)",
+        fontSize: 11,
+        fontWeight: 600,
+      }}
+    >
+      {status.code}
+    </span>
+  );
+}
+
 function uploadFiles(
   targetDirectory: string,
   files: File[],
@@ -197,11 +223,12 @@ function TreeNode({
   highlightedPaths,
   gitStatusByPath,
   changedDirectoryPaths,
+  t,
 }: {
   node: FileNode;
   depth: number;
   cwd: string;
-  onOpenFile: (filePath: string, fileName: string) => void;
+  onOpenFile: (filePath: string, fileName: string, options?: OpenFileOptions) => void;
   onAtMention?: (relativePath: string, isDir: boolean) => void;
   expandedPaths: Set<string>;
   onToggleExpanded: (fullPath: string, open: boolean) => void;
@@ -209,8 +236,8 @@ function TreeNode({
   highlightedPaths: Set<string>;
   gitStatusByPath: Map<string, GitFileStatus>;
   changedDirectoryPaths: Set<string>;
+  t: Translate;
 }) {
-  const { t } = useT();
   const open = expandedPaths.has(node.fullPath);
   const highlighted = highlightedPaths.has(node.fullPath);
   const normalizedPath = normalizeFilePathSlashes(node.fullPath);
@@ -305,38 +332,29 @@ function TreeNode({
           <span
             title={t("explorer.newlyUploaded")}
             aria-label={t("explorer.newlyUploaded")}
-            style={{ width: 6, height: 6, flexShrink: 0, borderRadius: "50%", background: "#3b82f6" }}
-          />
+            style={{ width: 14, height: 14, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}
+          >
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#3b82f6" }} />
+          </span>
         )}
         {!hovered && !node.isDir && gitStatus && (
-          <span
-            title={t(GIT_STATUS_LABEL_KEYS[gitStatus.status])}
-            aria-label={t(GIT_STATUS_LABEL_KEYS[gitStatus.status])}
-            style={{
-              width: 14,
-              flexShrink: 0,
-              color: GIT_STATUS_COLORS[gitStatus.status],
-              fontFamily: "var(--font-mono)",
-              fontSize: 11,
-              fontWeight: 600,
-              textAlign: "center",
-            }}
-          >
-            {gitStatus.code}
-          </span>
+          <GitStatusBadge status={gitStatus} t={t} />
         )}
         {!hovered && containsGitChanges && (
           <span
             title={t("explorer.containsChanges")}
             aria-label={t("explorer.containsChanges")}
             style={{
-              width: 6,
-              height: 6,
+              width: 14,
+              height: 14,
               flexShrink: 0,
-              borderRadius: "50%",
-              background: "#d6a84b",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
             }}
-          />
+          >
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#d6a84b" }} />
+          </span>
         )}
         {loading && (
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" strokeWidth="2" strokeLinecap="round">
@@ -427,6 +445,7 @@ function TreeNode({
               highlightedPaths={highlightedPaths}
               gitStatusByPath={gitStatusByPath}
               changedDirectoryPaths={changedDirectoryPaths}
+              t={t}
             />
           ))}
           {children.length === 0 && loaded && (
@@ -440,6 +459,63 @@ function TreeNode({
   );
 }
 
+type OpenFileOptions = { sourceSessionId?: string | null; modeHint?: "diff" };
+
+type OpenFileHandler = (filePath: string, fileName: string, options?: OpenFileOptions) => void;
+
+function ChangeRow({
+  status,
+  cwd,
+  onOpenFile,
+  t,
+}: {
+  status: GitFileStatus;
+  cwd: string;
+  onOpenFile: OpenFileHandler;
+  t: Translate;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const name = getFileName(status.filePath);
+  const rel = getRelativeFilePath(status.filePath, cwd);
+  return (
+    <div
+      onClick={() => onOpenFile(status.filePath, name, { modeHint: "diff" })}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      title={status.filePath}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        paddingLeft: 10,
+        paddingRight: 8,
+        height: 24,
+        cursor: "pointer",
+        background: hovered ? "var(--bg-hover)" : "transparent",
+        borderRadius: 4,
+        userSelect: "none",
+      }}
+    >
+      <GitStatusBadge status={status} t={t} />
+      <span style={{ flexShrink: 0, display: "flex", alignItems: "center", opacity: 0.85 }}>
+        {getFileIcon(name, 13)}
+      </span>
+      <span
+        style={{
+          fontSize: 12,
+          color: "var(--text)",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          flex: 1,
+        }}
+      >
+        {rel}
+      </span>
+    </div>
+  );
+}
+
 export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileExplorer({
   cwd,
   onOpenFile,
@@ -447,6 +523,8 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   onAtMention,
   onAtMentions,
   onUploadBusyChange,
+  changesCollapsed,
+  onChangesCountChange,
 }, ref) {
   const { t } = useT();
   const [roots, setRoots] = useState<FileNode[]>([]);
@@ -456,6 +534,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   const [treeRefreshKey, setTreeRefreshKey] = useState(0);
   const [highlightedPaths, setHighlightedPaths] = useState<Set<string>>(new Set());
   const [gitFiles, setGitFiles] = useState<GitFileStatus[]>([]);
+  const [gitLineStats, setGitLineStats] = useState({ additions: 0, deletions: 0 });
   const [uploadPhase, setUploadPhase] = useState<UploadPhase>("idle");
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -620,13 +699,25 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     let cancelled = false;
     fetchGitStatus(cwd)
       .then((status) => {
-        if (!cancelled) setGitFiles(status.isGitRepository ? status.files : []);
+        if (!cancelled) {
+          setGitFiles(status.isGitRepository ? status.files : []);
+          setGitLineStats(status.isGitRepository
+            ? { additions: status.additions, deletions: status.deletions }
+            : { additions: 0, deletions: 0 });
+        }
       })
       .catch(() => {
-        if (!cancelled) setGitFiles([]);
+        if (!cancelled) {
+          setGitFiles([]);
+          setGitLineStats({ additions: 0, deletions: 0 });
+        }
       });
     return () => { cancelled = true; };
   }, [cwd, refreshKey, treeRefreshKey]);
+
+  useEffect(() => {
+    onChangesCountChange?.(gitFiles.length);
+  }, [gitFiles, onChangesCountChange]);
 
   const showUploadFeedback = uploadBusy || pendingConflict !== null || uploadError !== null || uploadSummary !== null;
 
@@ -758,35 +849,56 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
         </div>
       )}
 
-      <div style={{ padding: "2px 4px" }}>
-        {loading ? (
-          <div style={{ padding: "8px 12px", fontSize: 11, color: "var(--text-dim)" }}>{t("general.loading")}</div>
-        ) : error ? (
-          <div style={{ padding: "8px 12px", fontSize: 11, color: "#f87171" }}>{error}</div>
-        ) : (
-          roots.map((node) => (
-            <TreeNode
-              key={node.fullPath}
-              node={node}
-              depth={0}
-              cwd={cwd}
-              onOpenFile={onOpenFile}
-              onAtMention={onAtMention}
-              expandedPaths={expandedPaths}
-              onToggleExpanded={handleToggleExpanded}
-              refreshToken={refreshToken}
-              highlightedPaths={highlightedPaths}
-              gitStatusByPath={gitStatusByPath}
-              changedDirectoryPaths={changedDirectoryPaths}
-            />
-          ))
-        )}
-        {!loading && !error && roots.length === 0 && (
-          <div style={{ padding: "8px 12px", fontSize: 11, color: "var(--text-dim)" }}>
-            {t("explorer.noFiles")}
+      {!changesCollapsed && gitFiles.length > 0 && (
+        <div style={{ padding: "0 4px 2px" }}>
+          <div
+            aria-label={`${gitFiles.length} changed, +${gitLineStats.additions} -${gitLineStats.deletions}`}
+            style={{ display: "flex", alignItems: "center", gap: 6, height: 24, padding: "0 10px", fontSize: 12 }}
+          >
+            <span style={{ color: "var(--text-dim)" }}>
+              {gitFiles.length} changed
+            </span>
+            <span style={{ color: GIT_STATUS_COLORS.added, fontFamily: "var(--font-mono)" }}>+{gitLineStats.additions}</span>
+            <span style={{ color: GIT_STATUS_COLORS.deleted, fontFamily: "var(--font-mono)" }}>-{gitLineStats.deletions}</span>
           </div>
-        )}
-      </div>
+          {gitFiles.map((status) => (
+            <ChangeRow key={status.filePath} status={status} cwd={cwd} onOpenFile={onOpenFile} t={t} />
+          ))}
+        </div>
+      )}
+
+      {(changesCollapsed || gitFiles.length === 0) && (
+        <div style={{ padding: "2px 4px" }}>
+          {loading ? (
+            <div style={{ padding: "8px 12px", fontSize: 11, color: "var(--text-dim)" }}>{t("general.loading")}</div>
+          ) : error ? (
+            <div style={{ padding: "8px 12px", fontSize: 11, color: "#f87171" }}>{error}</div>
+          ) : (
+            roots.map((node) => (
+              <TreeNode
+                key={node.fullPath}
+                node={node}
+                depth={0}
+                cwd={cwd}
+                onOpenFile={onOpenFile}
+                onAtMention={onAtMention}
+                expandedPaths={expandedPaths}
+                onToggleExpanded={handleToggleExpanded}
+                refreshToken={refreshToken}
+                highlightedPaths={highlightedPaths}
+                gitStatusByPath={gitStatusByPath}
+                changedDirectoryPaths={changedDirectoryPaths}
+                t={t}
+              />
+            ))
+          )}
+          {!loading && !error && roots.length === 0 && (
+            <div style={{ padding: "8px 12px", fontSize: 11, color: "var(--text-dim)" }}>
+              {t("explorer.noFiles")}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 });

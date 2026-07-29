@@ -14,6 +14,65 @@ declare global {
   }
 }
 
+function ToolbarIconButton({
+  onClick,
+  title,
+  disabled,
+  skipHover,
+  color,
+  background = "none",
+  marginRight,
+  ariaPressed,
+  children,
+}: {
+  onClick: () => void;
+  title: string;
+  disabled?: boolean;
+  skipHover?: boolean;
+  color: string;
+  background?: string;
+  marginRight?: number;
+  ariaPressed?: boolean;
+  children: ReactNode;
+}) {
+  const enter = (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (disabled || skipHover) return;
+    e.currentTarget.style.color = "var(--text-muted)";
+    e.currentTarget.style.background = "var(--bg-hover)";
+  };
+  const leave = (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (disabled || skipHover) return;
+    e.currentTarget.style.color = color;
+    e.currentTarget.style.background = background;
+  };
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      aria-label={title}
+      aria-pressed={ariaPressed}
+      style={{
+        position: "relative",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        width: 26, height: 26, padding: 0, marginRight,
+        background,
+        border: "none",
+        color,
+        cursor: disabled ? "default" : "pointer",
+        borderRadius: 5,
+        flexShrink: 0,
+        opacity: disabled ? 0.6 : 1,
+        transition: "color 0.3s, background 0.3s",
+      }}
+      onMouseEnter={enter}
+      onMouseLeave={leave}
+    >
+      {children}
+    </button>
+  );
+}
+
 interface Props {
   selectedSessionId: string | null;
   onSelectSession: (session: SessionInfo, isRestore?: boolean) => void;
@@ -25,7 +84,7 @@ interface Props {
   onSessionDeleted?: (sessionId: string) => void;
   selectedCwd?: string | null;
   onCwdChange?: (cwd: string | null, projectRoot?: string | null) => void;
-  onOpenFile?: (filePath: string, fileName: string) => void;
+  onOpenFile?: (filePath: string, fileName: string, options?: { sourceSessionId?: string | null; modeHint?: "diff" }) => void;
   explorerRefreshKey?: number;
   onExplorerRefresh?: () => void;
   onAtMention?: (relativePath: string, isDir: boolean) => void;
@@ -332,6 +391,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [homeDir, setHomeDir] = useState<string>("");
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [projectFilter, setProjectFilter] = useState("");
+  const [wtFilter, setWtFilter] = useState("");
   const [customPathOpen, setCustomPathOpen] = useState(false);
   const [customPathValue, setCustomPathValue] = useState("");
   const [customPathError, setCustomPathError] = useState<string | null>(null);
@@ -351,6 +411,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [explorerOpen, setExplorerOpen] = useState(true);
   const [explorerKey, setExplorerKey] = useState(0);
   const [explorerUploadBusy, setExplorerUploadBusy] = useState(false);
+  const [changesCount, setChangesCount] = useState(0);
+  const [changesCollapsed, setChangesCollapsed] = useState(true);
   const [sessionRefreshDone, setSessionRefreshDone] = useState(false);
   const [explorerRefreshDone, setExplorerRefreshDone] = useState(false);
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
@@ -689,6 +751,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         setWtNewBranch("");
         setWtError(null);
         setWtConfirmRemove(null);
+        setWtFilter("");
       }
     };
     document.addEventListener("mousedown", handler);
@@ -1063,6 +1126,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           if (!worktreeState) return null;
           const currentWt = worktreeState.worktrees.find((w) => w.path === selectedCwd)
             ?? worktreeState.worktrees.find((w) => w.isMain);
+          const showWtFilter = worktreeState.worktrees.length >= 8;
+          const visibleWorktrees = showWtFilter && wtFilter.trim()
+            ? worktreeState.worktrees.filter((w) =>
+                (w.branch ?? displayCwd(w.path, homeDir)).toLowerCase().includes(wtFilter.trim().toLowerCase()))
+            : worktreeState.worktrees;
           return (
             <div ref={wtDropdownRef} style={{ position: "relative", marginTop: 6 }}>
               <button
@@ -1097,7 +1165,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                   style={{ flex: 1, fontFamily: "var(--font-mono)", color: "var(--text)" }}
                 />
                 {currentWt?.isMain && (
-                  <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 10 }}>main</span>
+                   <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 10 }}>{t("sidebar.main")}</span>
                 )}
                 {worktreeState.worktrees.length > 1 && (
                   <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 10 }}>
@@ -1124,8 +1192,36 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                   overflow: "hidden",
                 }}
               >
+                  {showWtFilter && (
+                    <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)" }}>
+                      <input
+                        value={wtFilter}
+                        onChange={(e) => setWtFilter(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Escape") {
+                            setWtFilter("");
+                            setWtDropdownOpen(false);
+                          }
+                        }}
+                        placeholder={t("sidebar.filterWorktrees")}
+                        autoFocus
+                        style={{
+                          width: "100%",
+                          fontSize: 11,
+                          fontFamily: "var(--font-mono)",
+                          padding: "5px 8px",
+                          border: "1px solid var(--border)",
+                          borderRadius: 5,
+                          outline: "none",
+                          background: "var(--bg)",
+                          color: "var(--text)",
+                          boxSizing: "border-box",
+                        }}
+                      />
+                    </div>
+                  )}
                   <div style={{ maxHeight: "min(40vh, 300px)", overflowY: "auto" }}>
-                    {worktreeState.worktrees.map((wt) => {
+                    {visibleWorktrees.map((wt) => {
                       const isCurrent = wt.path === selectedCwd || (wt.isMain && !worktreeState.worktrees.some((w) => w.path === selectedCwd));
                       if (wtConfirmRemove === wt.path) {
                         return (
@@ -1160,6 +1256,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                               setSelectedCwd(wt.path);
                               setWtDropdownOpen(false);
                               setWtError(null);
+                              setWtFilter("");
                             }}
                             title={wt.path}
                             style={{
@@ -1186,7 +1283,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                               <span style={{ width: 10, flexShrink: 0 }} />
                             )}
                             <PathLabel text={wt.branch ?? displayCwd(wt.path, homeDir)} style={{ flex: 1 }} />
-                            {wt.isMain && <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 10 }}>main</span>}
+                            {wt.isMain && <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: 10 }}>{t("sidebar.main")}</span>}
                           </button>
                           {!wt.isMain && (
                             <button
@@ -1215,6 +1312,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                         </div>
                       );
                     })}
+                    {showWtFilter && visibleWorktrees.length === 0 && wtFilter.trim() && (
+                      <div style={{ padding: "8px 10px", fontSize: 11, color: "var(--text-dim)" }}>{t("sidebar.noMatchingWorktrees")}</div>
+                    )}
                   </div>
 
                   {!wtNewOpen ? (
@@ -1446,35 +1546,36 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               </svg>
               {t("explorer.title")}
             </button>
+            {explorerOpen && changesCount > 0 && (
+              <ToolbarIconButton
+                onClick={() => setChangesCollapsed((v) => !v)}
+                title={t("sidebar.changedFiles", { count: changesCount })}
+                ariaPressed={!changesCollapsed}
+                color={changesCollapsed ? "var(--text-dim)" : "var(--accent)"}
+                background={changesCollapsed ? "none" : "var(--bg-selected)"}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M3 12h6" />
+                  <path d="M15 12h6" />
+                </svg>
+              </ToolbarIconButton>
+            )}
             {explorerOpen && (
-              <button
+              <ToolbarIconButton
                 onClick={() => fileExplorerRef.current?.openUploadPicker()}
                 disabled={explorerUploadBusy}
                 title={t("sidebar.uploadFilesToRoot")}
-                aria-label={t("sidebar.uploadFiles")}
-                style={{
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  width: 26, height: 26, padding: 0,
-                  background: "none",
-                  border: "none",
-                  color: "var(--text-dim)",
-                  cursor: explorerUploadBusy ? "default" : "pointer",
-                  borderRadius: 5,
-                  flexShrink: 0,
-                  opacity: explorerUploadBusy ? 0.6 : 1,
-                  transition: "color 0.3s, background 0.3s",
-                }}
-                onMouseEnter={(e) => { if (explorerUploadBusy) return; e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.background = "var(--bg-hover)"; }}
-                onMouseLeave={(e) => { if (explorerUploadBusy) return; e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.background = "none"; }}
+                color="var(--text-dim)"
               >
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                   <path d="m17 8-5-5-5 5" />
                   <path d="M12 3v12" />
                 </svg>
-              </button>
+              </ToolbarIconButton>
             )}
-            <button
+            <ToolbarIconButton
               onClick={() => {
                 if (onExplorerRefresh) onExplorerRefresh();
                 else setExplorerKey((k) => k + 1);
@@ -1483,19 +1584,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 explorerRefreshTimerRef.current = setTimeout(() => setExplorerRefreshDone(false), 2000);
               }}
               title={t("explorer.refresh")}
-              style={{
-                display: "flex", alignItems: "center", justifyContent: "center",
-                width: 26, height: 26, padding: 0, marginRight: 6,
-                background: explorerRefreshDone ? "rgba(74,222,128,0.18)" : "none",
-                border: "none",
-                color: explorerRefreshDone ? "#4ade80" : "var(--text-dim)",
-                cursor: "pointer",
-                borderRadius: 5,
-                flexShrink: 0,
-                transition: "color 0.3s, background 0.3s",
-              }}
-              onMouseEnter={(e) => { if (explorerRefreshDone) return; e.currentTarget.style.color = "var(--text-muted)"; e.currentTarget.style.background = "var(--bg-hover)"; }}
-              onMouseLeave={(e) => { if (explorerRefreshDone) return; e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.background = "none"; }}
+              skipHover={explorerRefreshDone}
+              color={explorerRefreshDone ? "#4ade80" : "var(--text-dim)"}
+              background={explorerRefreshDone ? "rgba(74,222,128,0.18)" : "none"}
+              marginRight={6}
             >
               {explorerRefreshDone ? (
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -1507,7 +1599,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                   <path d="M3 3v5h5" />
                 </svg>
               )}
-            </button>
+            </ToolbarIconButton>
           </div>
           {explorerOpen && (
             <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
@@ -1519,6 +1611,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 onAtMention={onAtMention}
                 onAtMentions={onAtMentions}
                 onUploadBusyChange={setExplorerUploadBusy}
+                changesCollapsed={changesCollapsed}
+                onChangesCountChange={setChangesCount}
               />
             </div>
           )}
@@ -1722,13 +1816,7 @@ function SessionItem({
     }
   }, [renameValue, session.id, session.name, onRenamed]);
 
-  const handleDeleteClick = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    setConfirmDelete(true);
-  }, []);
-
-  const handleDeleteConfirm = useCallback(async (e: React.MouseEvent) => {
-    e.stopPropagation();
+  const performDelete = useCallback(async () => {
     setConfirmDelete(false);
     setDeleting(true);
     try {
@@ -1738,6 +1826,20 @@ function SessionItem({
       setDeleting(false);
     }
   }, [session.id, onDeleted]);
+
+  const handleDeleteClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (e.shiftKey) {
+      void performDelete();
+    } else {
+      setConfirmDelete(true);
+    }
+  }, [performDelete]);
+
+  const handleDeleteConfirm = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    void performDelete();
+  }, [performDelete]);
 
   const handleDeleteCancel = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -1943,7 +2045,7 @@ function SessionItem({
               </button>
               <button
                 onClick={handleDeleteClick}
-                title={t("sidebar.delete")}
+                title={t("sidebar.deleteWithShiftClick")}
                 style={{
                   display: "flex", alignItems: "center", justifyContent: "center",
                   width: 32, height: 32, padding: 0,

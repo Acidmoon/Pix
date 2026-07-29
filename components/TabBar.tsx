@@ -9,6 +9,7 @@ export interface Tab {
   label: string;
   filePath: string;
   sourceSessionId?: string | null;
+  initialDisplayMode?: "source" | "preview" | "diff";
 }
 
 interface Props {

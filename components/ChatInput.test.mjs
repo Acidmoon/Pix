@@ -8,7 +8,7 @@ const jiti = createJiti(import.meta.url, {
   jsx: { runtime: "automatic" },
   tsconfigPaths: true,
 });
-const { ChatInput, ModelErrorBanner } = await jiti.import("./ChatInput.tsx");
+const { ChatInput, ModelErrorBanner, filterModelOptions } = await jiti.import("./ChatInput.tsx");
 const { PixI18nProvider } = await jiti.import("@/lib/i18n");
 
 test("renders the upstream model error", () => {
@@ -59,4 +59,19 @@ test("keeps the model selector visible when a model error leaves no options", ()
 
   assert.match(html, />没有模型</);
   assert.match(html, /title="没有可用模型"/);
+});
+
+test("filters model options by name and id", () => {
+  const options = [
+    { provider: "ollama", modelId: "qwen3:latest", name: "Qwen 3" },
+    { provider: "anthropic", modelId: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
+    { provider: "openai", modelId: "gpt-5.4", name: "GPT-5.4" },
+  ];
+
+  assert.deepEqual(filterModelOptions(options, "QWEN"), [options[0]]);
+  assert.deepEqual(filterModelOptions(options, "claude-sonnet"), [options[1]]);
+  assert.equal(filterModelOptions(options, "OpenAI").length, 0);
+  assert.equal(filterModelOptions(options, "anthropic/claude").length, 0);
+  assert.equal(filterModelOptions(options, "missing").length, 0);
+  assert.equal(filterModelOptions(options, "  "), options);
 });
