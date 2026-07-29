@@ -444,7 +444,7 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
               cursor: !provider.baseUrl?.trim() || discoveryState.phase === "loading" ? "not-allowed" : "pointer", fontSize: 11,
             }}
           >
-            {discoveryState.phase === "loading" ? "Importing models…" : "Import models…"}
+            {discoveryState.phase === "loading" ? t("modelsconfig.discoveryFetching") : t("modelsconfig.discoveryFetch")}
           </button>
         )}
 
@@ -459,8 +459,8 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
             <input
               value={discoveryQuery}
               onChange={(event) => setDiscoveryQuery(event.target.value)}
-              placeholder={`Filter ${discoveryState.models.length} models…`}
-              aria-label="Filter upstream models"
+              placeholder={t("modelsconfig.discoveryFilterPlaceholder", { count: discoveryState.models.length })}
+              aria-label={t("modelsconfig.discoveryFilter")}
               style={{ ...inputStyle, width: "100%", minWidth: 0 }}
             />
 
@@ -481,10 +481,10 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
                   onChange={toggleShownModels}
                   style={{ width: 13, height: 13, accentColor: "var(--accent)", flexShrink: 0 }}
                 />
-                Select shown
+                {t("modelsconfig.discoverySelectShown")}
               </label>
               {shownDiscoveredModels.length === 0 ? (
-                <div style={{ padding: 12, color: "var(--text-dim)", fontSize: 11 }}>No matching models.</div>
+                <div style={{ padding: 12, color: "var(--text-dim)", fontSize: 11 }}>{t("modelsconfig.discoveryNoMatches")}</div>
               ) : shownDiscoveredModels.map((model, index) => {
                 const alreadyAdded = existingModelIds.has(model.id);
                 const checked = selectedModelIds.includes(model.id);
@@ -508,7 +508,7 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
                       <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text)", fontSize: 11 }}>{model.name ?? model.id}</span>
                       {model.name && <code style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-dim)", fontSize: 10, fontFamily: "var(--font-mono)" }}>{model.id}</code>}
                     </span>
-                    {alreadyAdded && <span style={{ color: "var(--text-dim)", fontSize: 10 }}>added</span>}
+                    {alreadyAdded && <span style={{ color: "var(--text-dim)", fontSize: 10 }}>{t("modelsconfig.discoveryAdded")}</span>}
                   </label>
                 );
               })}
@@ -517,8 +517,8 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
               <span title={discoveryState.endpoint} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-dim)", fontSize: 10 }}>
                 {filteredDiscoveredModels.length > shownDiscoveredModels.length
-                  ? `Showing first ${shownDiscoveredModels.length} of ${filteredDiscoveredModels.length}`
-                  : `${discoveryState.models.length} models fetched`}
+                  ? t("modelsconfig.discoveryShowing", { shown: shownDiscoveredModels.length, total: filteredDiscoveredModels.length })
+                  : t("modelsconfig.discoveryFetched", { count: discoveryState.models.length })}
               </span>
               <button
                 onClick={addSelectedModels}
@@ -526,8 +526,8 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
                 style={{ height: 28, padding: "0 11px", border: "none", borderRadius: 5, background: selectedCount ? "var(--accent)" : "var(--bg-panel)", color: selectedCount ? "#fff" : "var(--text-dim)", cursor: selectedCount ? "pointer" : "not-allowed", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}
               >
                 {selectedCount
-                  ? `Add selected (${selectedCount})`
-                  : "Add selected"}
+                  ? t("modelsconfig.discoveryAddSelectedCount", { count: selectedCount })
+                  : t("modelsconfig.discoveryAddSelected")}
               </button>
             </div>
           </>
@@ -869,19 +869,19 @@ function ModelDetail({
     if (catalogState.phase !== "success") return null;
     const { recommendation, appliedCount } = catalogState;
     const applied = appliedCount > 0
-      ? `${appliedCount} fields filled`
-      : "No empty fields to fill";
+      ? t("modelsconfig.catalogFilled", { count: appliedCount })
+      : t("modelsconfig.catalogNoEmptyFields");
     if (recommendation.price.status === "unreliable") {
       const price = recommendation.price.reason === "no-exact-match"
-        ? "No exact models.dev match"
-        : "No reliable price found";
+        ? t("modelsconfig.catalogNoExactMatch")
+        : t("modelsconfig.catalogPriceUnreliable");
       return `${applied} · ${price}`;
     }
     const price = recommendation.price.method === "provider"
-      ? `Price matched Provider ${recommendation.price.providerName ?? recommendation.price.providerId ?? providerName}`
+      ? t("modelsconfig.catalogPriceProvider", { provider: recommendation.price.providerName ?? recommendation.price.providerId ?? providerName })
       : recommendation.price.method === "base-url"
-        ? `Price matched Base URL to ${recommendation.price.providerName ?? recommendation.price.providerId ?? providerName}`
-        : `Price agreed by ${recommendation.price.support}/${recommendation.price.total} records`;
+        ? t("modelsconfig.catalogPriceBaseUrl", { provider: recommendation.price.providerName ?? recommendation.price.providerId ?? providerName })
+        : t("modelsconfig.catalogPriceConsensus", { support: recommendation.price.support, total: recommendation.price.total });
     return `${applied} · ${price}`;
   })();
   const catalogStatusText = catalogState.phase === "error"
@@ -973,7 +973,7 @@ function ModelDetail({
               fontSize: 11,
             }}
           >
-            {catalogState.phase === "loading" ? "Filling details…" : "Fill model details"}
+            {catalogState.phase === "loading" ? t("modelsconfig.catalogFilling") : t("modelsconfig.catalogFill")}
           </button>
           <a
             href="https://github.com/anomalyco/models.dev"
@@ -981,7 +981,7 @@ function ModelDetail({
             rel="noreferrer"
             style={{ marginLeft: "auto", color: "var(--text-dim)", fontSize: 10, textDecoration: "none" }}
           >
-            source: models.dev ↗
+            {t("modelsconfig.catalogSource")}
           </a>
         </div>
 
@@ -1003,7 +1003,7 @@ function ModelDetail({
               onClick={undoCatalogFill}
               style={{ flexShrink: 0, padding: "0 2px", border: "none", background: "none", color: "var(--accent)", cursor: "pointer", fontSize: 10 }}
             >
-              Undo
+              {t("modelsconfig.catalogUndo")}
             </button>
           )}
         </div>

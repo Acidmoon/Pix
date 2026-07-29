@@ -1,6 +1,6 @@
 "use client";
 
-import { useI18n } from "@/hooks/useI18n";
+import { useT } from "@/lib/i18n";
 
 export function ProjectTrustDialog({
   cwd,
@@ -15,7 +15,7 @@ export function ProjectTrustDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const { t } = useI18n();
+  const { t } = useT();
 
   return (
     <div

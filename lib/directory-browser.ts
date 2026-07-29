@@ -1,5 +1,4 @@
 import { readdir, realpath, stat } from "fs/promises";
-import { homedir } from "os";
 import path from "path";
 
 export interface BrowsableDirectory {
@@ -7,13 +6,23 @@ export interface BrowsableDirectory {
   path: string;
 }
 
+// 不要用 os.homedir()：构建期 @vercel/nft 会静态求值 resolve(homedir(), <动态参数>)，
+// 把整个用户目录当资源 glob 递归扫描，Windows 上扫到 My Documents 等系统
+// junction 会 EPERM 导致构建失败。process.env 运行时取值，nft 无法静态求值
+// （同 lib/file-access.ts 的处理）。
+function homeDir(): string {
+  const home = process.env.USERPROFILE ?? process.env.HOME;
+  if (!home) throw new Error("cannot determine home directory");
+  return home;
+}
+
 export function getBrowseStartDirectory(directory?: string): string {
-  return directory || homedir();
+  return directory || homeDir();
 }
 
 export function normalizeDirectory(directory: string): string {
-  if (directory === "~") return homedir();
-  if (directory.startsWith("~/")) return path.resolve(homedir(), directory.slice(2));
+  if (directory === "~") return homeDir();
+  if (directory.startsWith("~/")) return path.resolve(homeDir(), directory.slice(2));
   return path.resolve(directory);
 }
 

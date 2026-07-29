@@ -1979,7 +1979,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                       <div style={{ minHeight: 0, overflowY: "auto" }}>
                         {modelsByProvider.length === 0 ? (
                           <div style={{ padding: "8px 12px", color: "var(--text-dim)", fontSize: 12, whiteSpace: "nowrap" }}>
-                            {modelFilter.trim() ? "No matching models" : t("chatinput.noAvailableModels")}
+                            {modelFilter.trim() ? t("chatinput.noMatchingModels") : t("chatinput.noAvailableModels")}
                           </div>
                         ) : modelsByProvider.map((group, gi) => (
                           <div key={group.provider}>

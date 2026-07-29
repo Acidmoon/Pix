@@ -262,8 +262,7 @@ function SegmentedScope({
               if (!disabled) onChange(scope);
             }}
             disabled={disabled}
-            // 上游 trust 功能新增文案，locales 尚无对应 key，先保留英文硬编码
-            title={disabled ? "Project installs are unavailable while project resources are not loaded." : undefined}
+            title={disabled ? t("trust.projectScopeUnavailable") : undefined}
             style={{
               width: 76,
               border: "none",
@@ -807,8 +806,7 @@ export function PluginsConfig({
               fontSize: 12,
             }}
           >
-            {/* 上游 trust 功能新增文案，locales 尚无对应 key，先保留英文硬编码 */}
-            {"Project plugins are not loaded because this project is not trusted."}
+            {t("trust.pluginsNotLoaded")}
           </div>
         )}
 

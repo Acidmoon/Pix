@@ -16,7 +16,6 @@ import { useT } from "@/lib/i18n";
 import { ProjectTrustDialog } from "./ProjectTrustDialog";
 import { BranchNavigator } from "./BranchNavigator";
 import { useTheme } from "@/hooks/useTheme";
-import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { copyText } from "@/lib/clipboard";
 import { getFileName } from "@/lib/file-paths";
@@ -36,13 +35,17 @@ type AutoNameStatus =
 
 const TOP_BAR_ICON_BUTTON_SIZE = 36;
 const LANGUAGE_MENU_WIDTH = 176;
+// 语言菜单选项：与本 fork 的 useT 语言值（zh/en）一一对应
+const LANGUAGE_OPTIONS: Array<{ id: "zh" | "en"; label: string }> = [
+  { id: "zh", label: "简体中文" },
+  { id: "en", label: "English" },
+];
 
 export function AppShell() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [initialNavigation] = useState(() => getInitialNavigation(searchParams));
   const { isDark, toggleTheme } = useTheme();
-  const { setLocale, t: translate, supportedLocales } = useI18n();
   const isMobile = useIsMobile();
   const [selectedSession, setSelectedSession] = useState<SessionInfo | null>(null);
   // When user clicks +, we only store the cwd — no fake session id
@@ -98,14 +101,6 @@ export function AppShell() {
   const languageBtnRef = useRef<HTMLButtonElement>(null);
 
   const { t, lang, setLang } = useT();
-  // 上游语言菜单驱动的是上游 i18n（hooks/useI18n），这里把当前语言映射成
-  // 上游 locale id，让菜单高亮与本 fork 的 useT 语言保持一致
-  const activeLocaleId = lang === "zh" ? "zh-CN" : "en";
-  // 本 fork 的 useT 与上游 useI18n 并存：让上游 locale 始终跟随本 fork 语言，
-  // 这样从设置弹窗切换语言时，上游新增的文案（语言菜单、信任提示）也会同步
-  useEffect(() => {
-    setLocale(activeLocaleId as typeof locale);
-  }, [activeLocaleId, setLocale]);
 
   // Branch navigator state — populated by ChatWindow via onBranchDataChange
   const [branchTree, setBranchTree] = useState<SessionTreeNode[]>([]);
@@ -808,8 +803,8 @@ export function AppShell() {
              ref={languageBtnRef}
              type="button"
              onClick={() => toggleTopPanel("language")}
-             title={translate("common.language")}
-             aria-label={translate("common.language")}
+             title={t("common.language")}
+             aria-label={t("common.language")}
              aria-haspopup="menu"
              aria-expanded={activeTopPanel === "language"}
              aria-pressed={activeTopPanel === "language"}
@@ -852,8 +847,8 @@ export function AppShell() {
                 setProjectTrustError(null);
                 setProjectTrustDialogOpen(true);
               }}
-              title={translate("trust.resourcesNotLoaded")}
-              aria-label={translate("trust.resourcesNotLoaded")}
+              title={t("trust.resourcesNotLoaded")}
+              aria-label={t("trust.resourcesNotLoaded")}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -885,7 +880,7 @@ export function AppShell() {
                 <path d="M12 8v4" />
                 <path d="M12 16h.01" />
               </svg>
-              {!isMobile && <span>{translate("trust.resourcesNotLoaded")}</span>}
+              {!isMobile && <span>{t("trust.resourcesNotLoaded")}</span>}
             </button>
           )}
           {showChat && (
@@ -1172,7 +1167,7 @@ export function AppShell() {
               {activeTopPanel === "language" && (
                 <div
                   role="menu"
-                  aria-label={translate("common.language")}
+                  aria-label={t("common.language")}
                   style={{
                     background: "var(--bg-panel)",
                     borderLeft: "1px solid var(--border)",
@@ -1182,34 +1177,32 @@ export function AppShell() {
                     padding: 4,
                   }}
                 >
-                  {supportedLocales.map((plugin) => (
+                  {LANGUAGE_OPTIONS.map((option) => (
                     <button
-                      key={plugin.id}
+                      key={option.id}
                       type="button"
                       onClick={() => {
-                        setLocale(plugin.id as typeof locale);
-                        // 同步切换本 fork 的 useT 语言（zh-CN ↔ zh）
-                        setLang(plugin.id === "zh-CN" ? "zh" : "en");
+                        setLang(option.id);
                         setActiveTopPanel(null);
                       }}
                       role="menuitemradio"
-                      aria-checked={activeLocaleId === plugin.id}
+                      aria-checked={lang === option.id}
                       style={{
                         display: "flex", alignItems: "center",
                         width: "100%", height: 34, padding: "0 10px",
                         border: "none", borderRadius: 4,
-                        background: activeLocaleId === plugin.id ? "var(--bg-selected)" : "transparent",
+                        background: lang === option.id ? "var(--bg-selected)" : "transparent",
                         color: "var(--text)", cursor: "pointer", textAlign: "left", fontSize: 12,
                         transition: "background 0.1s",
                       }}
                       onMouseEnter={(e) => {
-                        if (activeLocaleId !== plugin.id) e.currentTarget.style.background = "var(--bg-hover)";
+                        if (lang !== option.id) e.currentTarget.style.background = "var(--bg-hover)";
                       }}
                       onMouseLeave={(e) => {
-                        if (activeLocaleId !== plugin.id) e.currentTarget.style.background = "transparent";
+                        if (lang !== option.id) e.currentTarget.style.background = "transparent";
                       }}
                     >
-                      <span>{plugin.label}</span>
+                      <span>{option.label}</span>
                     </button>
                   ))}
                 </div>

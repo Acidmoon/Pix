@@ -852,11 +852,11 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       {!changesCollapsed && gitFiles.length > 0 && (
         <div style={{ padding: "0 4px 2px" }}>
           <div
-            aria-label={`${gitFiles.length} changed, +${gitLineStats.additions} -${gitLineStats.deletions}`}
+            aria-label={`${t("explorer.changedFiles", { count: gitFiles.length })}, +${gitLineStats.additions} -${gitLineStats.deletions}`}
             style={{ display: "flex", alignItems: "center", gap: 6, height: 24, padding: "0 10px", fontSize: 12 }}
           >
             <span style={{ color: "var(--text-dim)" }}>
-              {gitFiles.length} changed
+              {t("explorer.changedFiles", { count: gitFiles.length })}
             </span>
             <span style={{ color: GIT_STATUS_COLORS.added, fontFamily: "var(--font-mono)" }}>+{gitLineStats.additions}</span>
             <span style={{ color: GIT_STATUS_COLORS.deleted, fontFamily: "var(--font-mono)" }}>-{gitLineStats.deletions}</span>

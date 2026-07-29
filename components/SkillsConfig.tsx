@@ -507,8 +507,7 @@ function AddSkillPanel({
                   if (s === "global" || projectResourcesLoaded) setScope(s);
                 }}
                 disabled={s === "project" && !projectResourcesLoaded}
-                // 上游 trust 功能新增文案，locales 尚无对应 key，先保留英文硬编码
-                title={s === "project" && !projectResourcesLoaded ? "Project installs are unavailable while project resources are not loaded." : undefined}
+                title={s === "project" && !projectResourcesLoaded ? t("trust.projectScopeUnavailable") : undefined}
                 style={{
                   padding: "3px 10px",
                   border: "none",
@@ -953,8 +952,7 @@ export function SkillsConfig({
               fontSize: 12,
             }}
           >
-            {/* 上游 trust 功能新增文案，locales 尚无对应 key，先保留英文硬编码 */}
-            {"Project skills are not loaded because this project is not trusted."}
+            {t("trust.skillsNotLoaded")}
           </div>
         )}
 

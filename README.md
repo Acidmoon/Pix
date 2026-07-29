@@ -157,7 +157,7 @@ Edge/Chrome --app window (user's existing Default profile)
 - **File access**: file browsing and preview are scoped to the selected project directory and working directories that appear in sessions.
 - **Git worktrees**: see [Worktrees in Pi Web](./docs/worktrees.md) for when the switcher appears, how new worktrees are created, and what removal does.
 - **Forks vs in-session branches**: Fork creates a new `.jsonl` file. "Edit from here" creates another branch inside the same session file.
-- **Internationalization**: see [Internationalization](./docs/i18n.md) for using translations and adding languages or UI text.
+- **Internationalization**: UI text lives in `lib/locales/zh.json` / `lib/locales/en.json` (keys must stay in sync) and is consumed via `useT()` from `lib/i18n.tsx`.
 
 ## Development
 
